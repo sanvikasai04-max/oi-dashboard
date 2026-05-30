@@ -1,4 +1,8 @@
+# Nifty_Live_OI_GreeksData
+
+```bash
 pip install -r requirements.txt
+```
 
 # 📊 Institutional OI Dashboard
 
