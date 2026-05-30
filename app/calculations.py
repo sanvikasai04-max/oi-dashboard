@@ -213,16 +213,17 @@ def generate_oi_table(
 
         if option_type == "CE":
 
+            prev_bucket = grouped.iloc[i - 1]
+
             price_change = (
                 current["call_price_last"]
-                - current["call_price_first"]
+                - prev_bucket["call_price_last"]
             )
 
             oi_change = (
                 current["call_oi_last"]
-                - current["call_oi_first"]
+                - prev_bucket["call_oi_last"]
             )
-            prev_bucket = grouped.iloc[i - 1]
 
             volume_change = (
                 current["call_volume_last"]
@@ -241,17 +242,17 @@ def generate_oi_table(
             prev_iv = past["call_iv_last"]
         else:
 
+            prev_bucket = grouped.iloc[i - 1]
+
             price_change = (
                 current["put_price_last"]
-                - current["put_price_first"]
+                - prev_bucket["put_price_last"]
             )
 
             oi_change = (
                 current["put_oi_last"]
-                - current["put_oi_first"]
+                - prev_bucket["put_oi_last"]
             )
-
-            prev_bucket = grouped.iloc[i - 1]
 
             volume_change = (
                 current["put_volume_last"]
