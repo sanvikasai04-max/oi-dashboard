@@ -190,58 +190,42 @@ function fillTable(bodyId, rows, optionType){
 
 function getBuildClass(buildup, optionType) {
 
-    // =====================================
-    // CE LOGIC
-    // =====================================
-
     if (optionType === "CE") {
 
-        if (
-            buildup.includes("Long Build")
-            ||
-            buildup.includes("Short Cover")
-        ) {
-
+        if (buildup === "Long Build-up") {
             return "bullish-build";
-
         }
 
-        if (
-            buildup.includes("Short Build")
-            ||
-            buildup.includes("Long Unwind")
-        ) {
+        if (buildup === "Short Covering") {
+            return "bullish-build";
+        }
 
+        if (buildup === "Short Build-up") {
             return "bearish-build";
+        }
 
+        if (buildup === "Long Unwinding") {
+            return "bearish-build";
         }
 
     }
 
-    // =====================================
-    // PE LOGIC
-    // =====================================
-
     if (optionType === "PE") {
 
-        if (
-            buildup.includes("Short Build")
-            ||
-            buildup.includes("Long Unwind")
-        ) {
-
-            return "bullish-build";
-
+        if (buildup === "Long Build-up") {
+            return "bearish-build";
         }
 
-        if (
-            buildup.includes("Long Build")
-            ||
-            buildup.includes("Short Cover")
-        ) {
-
+        if (buildup === "Short Covering") {
             return "bearish-build";
+        }
 
+        if (buildup === "Short Build-up") {
+            return "bullish-build";
+        }
+
+        if (buildup === "Long Unwinding") {
+            return "bullish-build";
         }
 
     }

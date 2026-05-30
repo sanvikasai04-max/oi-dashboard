@@ -462,18 +462,38 @@ table {
     font-weight: bold;
 
 }
-.bullish-build {
+.table td.bullish-build {
 
-    color: #22c55e;
+    --bs-table-bg: rgba(34, 197, 94, 0.16);
+
+    --bs-table-color: #22c55e;
+
+    background-color: rgba(34, 197, 94, 0.16) !important;
+
+    color: #22c55e !important;
 
     font-weight: bold;
+
+    border-radius: 4px;
+
+    box-shadow: inset 0 0 0 9999px rgba(34, 197, 94, 0.08) !important;
 
 }
 
-.bearish-build {
+.table td.bearish-build {
 
-    color: #ef4444;
+    --bs-table-bg: rgba(239, 68, 68, 0.16);
+
+    --bs-table-color: #ef4444;
+
+    background-color: rgba(239, 68, 68, 0.16) !important;
+
+    color: #ef4444 !important;
 
     font-weight: bold;
+
+    border-radius: 4px;
+
+    box-shadow: inset 0 0 0 9999px rgba(239, 68, 68, 0.08) !important;
 
 }
