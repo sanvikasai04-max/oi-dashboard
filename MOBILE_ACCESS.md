@@ -113,7 +113,29 @@ Then wait a few seconds. If it does not respond, try:
 
 ## Daily Usage
 
-Every day, run these two commands in two separate PowerShell windows.
+Every day, you can use the automated script:
+
+```powershell
+run_mobile.bat
+```
+
+This opens two terminal windows automatically:
+
+1. FastAPI dashboard on port `8000`.
+2. ngrok fixed-domain tunnel.
+
+Keep both opened terminal windows running.
+
+Then use:
+
+```text
+ATM: https://insessorial-tess-unlean.ngrok-free.dev/dashboard
+ITM: https://insessorial-tess-unlean.ngrok-free.dev/itm
+```
+
+Manual option:
+
+Run these two commands in two separate PowerShell windows.
 
 PowerShell 1:
 
@@ -157,4 +179,3 @@ app.main:app
 ```
 
 9. If you do not use the fixed domain command, normal `ngrok http 8000` may generate a different URL after restart.
-
