@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h3>Dashboard</h3>
+
+<select id="timeframe" class="form-select" style="width:120px; margin-bottom:15px;">
+
+    <option value="5m">5m</option>
+    <option value="15m">15m</option>
+    <option value="30m">30m</option>
+    <option value="1hr">1hr</option>
+
+</select>
+
+<h5>
+    Spot:
+    <span id="spot-price">0</span>
+</h5>
+
+<h5>
+    Data Date:
+    <span id="last-update" style="color: #ffc107;">--</span>
+</h5>
+
+<div class="grid-container">
+
+    <!-- ATM CE -->
+
+    <div class="table-card">
+
+        <h5 class="ce-header p-2">
+            ATM CE - <span id="atm-ce-strike"></span>
+        </h5>
+
+        <div class="table-scroll">
+
+            <table class="table table-dark table-hover">
+
+                <thead>
+
+                    <tr>
+
+                        <th>Time</th>
+                        <th>Build</th>
+                        <th>Vol</th>
+                        <th>Delta</th>
+                        <th>Gamma</th>
+                        <th>IV</th>
+
+                    </tr>
+
+                </thead>
+
+                <tbody id="atm-ce-body"></tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+    <!-- ATM PE -->
+
+    <div class="table-card">
+
+        <h5 class="pe-header p-2">
+            ATM PE - <span id="atm-pe-strike"></span>
+        </h5>
+
+        <div class="table-scroll">
+
+            <table class="table table-dark table-hover">
+
+                <thead>
+
+                    <tr>
+
+                        <th>Time</th>
+                        <th>Build</th>
+                        <th>Vol</th>
+                        <th>Delta</th>
+                        <th>Gamma</th>
+                        <th>IV</th>
+
+                    </tr>
+
+                </thead>
+
+                <tbody id="atm-pe-body"></tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+    <!-- OTM CE -->
+
+    <div class="table-card">
+
+        <h5 class="ce-header p-2">
+            OTM CE - <span id="otm-ce-strike"></span>
+        </h5>
+
+        <div class="table-scroll">
+
+            <table class="table table-dark table-hover">
+
+                <thead>
+
+                    <tr>
+
+                        <th>Time</th>
+                        <th>Build</th>
+                        <th>Vol</th>
+                        <th>Delta</th>
+                        <th>Gamma</th>
+                        <th>IV</th>
+
+                    </tr>
+
+                </thead>
+
+                <tbody id="otm-ce-body"></tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+    <!-- OTM PE -->
+
+    <div class="table-card">
+
+        <h5 class="pe-header p-2">
+            OTM PE - <span id="otm-pe-strike"></span>
+        </h5>
+
+        <div class="table-scroll">
+
+            <table class="table table-dark table-hover">
+
+                <thead>
+
+                    <tr>
+
+                        <th>Time</th>
+                        <th>Build</th>
+                        <th>Vol</th>
+                        <th>Delta</th>
+                        <th>Gamma</th>
+                        <th>IV</th>
+
+                    </tr>
+
+                </thead>
+
+                <tbody id="otm-pe-body"></tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+</div>
+
+<script src="/static/js/dashboard.js?v=20260530"></script>
+
+{% endblock %}

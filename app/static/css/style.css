@@ -1,0 +1,479 @@
+/* =========================================
+   GLOBAL
+========================================= */
+
+body {
+
+    background-color: #111827;
+
+    color: white;
+
+    font-family: Arial, sans-serif;
+
+}
+
+/* =========================================
+   NAVBAR
+========================================= */
+
+.navbar {
+
+    border-bottom: 2px solid #374151;
+
+}
+
+/* =========================================
+   CARDS
+========================================= */
+
+.dashboard-card {
+
+    background-color: #1f2937;
+
+    border: 1px solid #374151;
+
+    border-radius: 12px;
+
+    box-shadow: 0 0 10px rgba(0,0,0,0.3);
+
+}
+
+.dashboard-card h5 {
+
+    color: #9ca3af;
+
+    font-size: 16px;
+
+    margin-bottom: 10px;
+
+}
+
+.dashboard-card h2 {
+
+    font-size: 28px;
+
+    font-weight: bold;
+
+    color: #f9fafb;
+
+}
+
+/* =========================================
+   TABLE CARDS
+========================================= */
+
+.table-card {
+
+    background-color: #1f2937;
+
+    border: 1px solid #374151;
+
+    border-radius: 12px;
+
+    overflow: hidden;
+
+}
+
+/* =========================================
+   TABLE HEADERS
+========================================= */
+
+.ce-header {
+
+    background-color: #065f46;
+
+    color: white;
+
+    font-size: 20px;
+
+    font-weight: bold;
+
+}
+
+.pe-header {
+
+    background-color: #7f1d1d;
+
+    color: white;
+
+    font-size: 20px;
+
+    font-weight: bold;
+
+}
+
+.itm-header {
+
+    background-color: #1d4ed8;
+
+    color: white;
+
+    font-size: 20px;
+
+    font-weight: bold;
+
+}
+
+.otm-header {
+
+    background-color: #c2410c;
+
+    color: white;
+
+    font-size: 20px;
+
+    font-weight: bold;
+
+}
+
+/* =========================================
+   TABLES
+========================================= */
+
+table {
+
+    margin-bottom: 0 !important;
+
+}
+
+.table {
+
+    color: white;
+
+}
+
+.table thead {
+
+    background-color: #374151;
+
+}
+
+.table th {
+
+    text-align: center;
+
+    vertical-align: middle;
+
+    font-size: 15px;
+
+    padding: 14px;
+
+}
+
+.table td {
+
+    text-align: center;
+
+    vertical-align: middle;
+
+    font-size: 14px;
+
+    padding: 12px;
+
+    font-weight: bold;
+
+}
+
+/* =========================================
+   BUILDUP COLORS
+========================================= */
+
+.long-build {
+
+    background-color: rgba(34, 197, 94, 0.20);
+
+    color: #22c55e;
+
+    font-weight: bold;
+
+    border-radius: 6px;
+
+}
+
+.short-build {
+
+    background-color: rgba(239, 68, 68, 0.20);
+
+    color: #ef4444;
+
+    font-weight: bold;
+
+    border-radius: 6px;
+
+}
+
+.short-cover {
+
+    background-color: rgba(234, 179, 8, 0.20);
+
+    color: #eab308;
+
+    font-weight: bold;
+
+    border-radius: 6px;
+
+}
+
+.long-unwind {
+
+    background-color: rgba(59, 130, 246, 0.20);
+
+    color: #3b82f6;
+
+    font-weight: bold;
+
+    border-radius: 6px;
+
+}
+/* =========================================
+   FORM SELECT
+========================================= */
+
+.form-select {
+
+    background-color: #374151;
+
+    color: white;
+
+    border: 1px solid #4b5563;
+
+}
+
+.form-select:focus {
+
+    border-color: #60a5fa;
+
+    box-shadow: none;
+
+}
+
+/* =========================================
+   SCROLLBAR
+========================================= */
+
+.table-responsive {
+
+    max-height: 600px;
+
+    overflow-y: auto;
+
+}
+
+/* =========================================
+   BADGES
+========================================= */
+
+.badge-green {
+
+    background-color: #065f46;
+
+    color: white;
+
+    padding: 6px 10px;
+
+    border-radius: 8px;
+
+}
+
+.badge-red {
+
+    background-color: #7f1d1d;
+
+    color: white;
+
+    padding: 6px 10px;
+
+    border-radius: 8px;
+
+}
+
+.badge-yellow {
+
+    background-color: #92400e;
+
+    color: white;
+
+    padding: 6px 10px;
+
+    border-radius: 8px;
+
+}
+
+.badge-blue {
+
+    background-color: #1d4ed8;
+
+    color: white;
+
+    padding: 6px 10px;
+
+    border-radius: 8px;
+
+}
+
+/* =========================================
+   RESPONSIVE
+========================================= */
+
+@media screen and (max-width: 768px) {
+
+    .dashboard-card h2 {
+
+        font-size: 20px;
+
+    }
+
+    .table th,
+    .table td {
+
+        font-size: 12px;
+
+        padding: 8px;
+
+    }
+
+}
+/* =========================================
+   GRID LAYOUT
+========================================= */
+
+.grid-container {
+
+    display: grid;
+
+    grid-template-columns: repeat(2, 1fr);
+
+    gap: 15px;
+
+    margin-top: 20px;
+
+}
+
+/* =========================================
+   TABLE SCROLL
+========================================= */
+
+.table-scroll {
+
+    height: 320px;
+
+    overflow-y: auto;
+
+}
+
+/* =========================================
+   STICKY HEADER
+========================================= */
+
+.table thead th {
+
+    position: sticky;
+
+    top: 0;
+
+    background-color: #374151;
+
+    z-index: 2;
+
+}
+
+/* =========================================
+   TABLE FONT
+========================================= */
+
+.table td {
+
+    font-size: 12px;
+
+    font-weight: bold;
+
+}
+
+.table th {
+
+    font-size: 13px;
+
+    font-weight: bold;
+
+}
+
+/* =========================================
+   TABLE HOVER
+========================================= */
+
+.table-hover tbody tr:hover {
+
+    background-color: #1e293b;
+
+}
+
+/* =========================================
+   RESPONSIVE
+========================================= */
+
+@media screen and (max-width: 900px) {
+
+    .grid-container {
+
+        grid-template-columns: 1fr;
+
+    }
+
+}
+.grid-container {
+
+    display: grid;
+
+    grid-template-columns: 1fr 1fr;
+
+    gap: 20px;
+
+}
+/* =========================================
+   GREEK CHANGE COLORS
+========================================= */
+
+.pct-green {
+
+    color: #22c55e;
+
+    font-size: 11px;
+
+    font-weight: bold;
+
+}
+
+.pct-red {
+
+    color: #ef4444;
+
+    font-size: 11px;
+
+    font-weight: bold;
+
+}
+
+.pct-neutral {
+
+    color: #9ca3af;
+
+    font-size: 11px;
+
+    font-weight: bold;
+
+}
+.bullish-build {
+
+    color: #22c55e;
+
+    font-weight: bold;
+
+}
+
+.bearish-build {
+
+    color: #ef4444;
+
+    font-weight: bold;
+
+}

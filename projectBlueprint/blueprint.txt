@@ -1,0 +1,789 @@
+# Institutional-Style OI Dashboard (HTML + FastAPI)
+
+## Project Goal
+
+Build a professional low-latency HTML dashboard for:
+
+* ATM live monitoring
+* ITM/OTM monitoring
+* Multi-timeframe OI analysis
+* Greeks analysis (Delta, Gamma, IV)
+* Historical replay
+* Live market monitoring
+
+The project replaces Streamlit with:
+
+* FastAPI backend
+* HTML + Bootstrap frontend
+* JavaScript live updates
+* SQLite historical storage
+
+---
+
+# Why Move From Streamlit?
+
+## Current Streamlit Issues
+
+### Full Script Rerun
+
+Every refresh:
+
+* entire Python script reruns
+* UI redraws completely
+* more CPU usage
+* slower response
+
+### Harder UI Customization
+
+* limited layout flexibility
+* difficult realtime animations
+* difficult professional trading layout
+
+### Scaling Issues
+
+As project grows:
+
+* Greeks
+* charts
+* heatmaps
+* multiple pages
+* replay mode
+
+Streamlit becomes harder to manage.
+
+---
+
+# New Architecture
+
+```text
+Dhan API
+   ↓
+Python Collector Engine
+   ↓
+SQLite Database
+   ↓
+FastAPI Backend
+   ↓
+HTML + JS Frontend
+```
+
+---
+
+# Main Features
+
+## Live Monitoring
+
+### Page 1
+
+ATM Dashboard
+
+Shows:
+
+* ATM CE
+* ATM PE
+* OI Build-up
+* Volume
+* Delta
+* Gamma
+* IV
+* PCR
+* Spot
+
+---
+
+### Page 2
+
+ITM / OTM Dashboard
+
+Shows:
+
+* 1 ITM CE
+* 1 OTM CE
+* 1 ITM PE
+* 1 OTM PE
+* Build-up comparison
+* Trap detection
+* Hedge flow
+
+---
+
+## Multi-Timeframe Support
+
+Single raw storage:
+
+* 5-minute snapshots only
+
+Dynamic calculation:
+
+* 5m
+* 15m
+* 30m
+* 1hr
+
+No duplicate storage.
+
+---
+
+## Historical Replay
+
+After market close:
+
+* historical data still viewable
+* replay old sessions
+* analyze expiry behavior
+* study trap days
+
+---
+
+# Final Folder Structure
+
+```text
+oi-dashboard/
+│
+├── app/
+│   ├── main.py
+│   ├── collector.py
+│   ├── calculations.py
+│   ├── database.py
+│   ├── config.py
+│   ├── routes/
+│   │   ├── atm.py
+│   │   ├── itm_otm.py
+│   │   └── historical.py
+│   │
+│   ├── templates/
+│   │   ├── atm.html
+│   │   ├── itm_otm.html
+│   │   └── base.html
+│   │
+│   ├── static/
+│   │   ├── css/
+│   │   │   └── style.css
+│   │   │
+│   │   ├── js/
+│   │   │   ├── atm.js
+│   │   │   └── itm_otm.js
+│   │   │
+│   │   └── images/
+│   │
+│   └── data/
+│       └── oi_data.db
+│
+├── requirements.txt
+├── README.md
+└── run.bat
+```
+
+---
+
+# Technology Stack
+
+## Backend
+
+### FastAPI
+
+Used for:
+
+* API endpoints
+* data serving
+* low latency
+* scalability
+
+---
+
+## Frontend
+
+### HTML
+
+Structure
+
+### Bootstrap
+
+Responsive UI
+
+### JavaScript
+
+Live updates
+
+### Fetch API
+
+Realtime polling
+
+---
+
+## Database
+
+### SQLite
+
+Stores:
+
+* OI
+* prices
+* volume
+* delta
+* gamma
+* IV
+* timestamps
+
+---
+
+# Installation Steps
+
+## Step 1 — Create Project Folder
+
+```bash
+mkdir oi-dashboard
+cd oi-dashboard
+```
+
+---
+
+## Step 2 — Create Virtual Environment
+
+```bash
+python -m venv venv
+```
+
+---
+
+## Step 3 — Activate Environment
+
+### Windows
+
+```bash
+venv\Scripts\activate
+```
+
+---
+
+## Step 4 — Install Packages
+
+```bash
+pip install fastapi uvicorn jinja2 requests pandas sqlalchemy python-multipart
+```
+
+---
+
+## Step 5 — Create requirements.txt
+
+```bash
+pip freeze > requirements.txt
+```
+
+---
+
+# Database Design
+
+## Table Structure
+
+```sql
+CREATE TABLE oi_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT,
+    strike REAL,
+    spot REAL,
+
+    call_oi INTEGER,
+    put_oi INTEGER,
+
+    call_price REAL,
+    put_price REAL,
+
+    call_volume INTEGER,
+    put_volume INTEGER,
+
+    call_delta REAL,
+    put_delta REAL,
+
+    call_gamma REAL,
+    put_gamma REAL,
+
+    call_iv REAL,
+    put_iv REAL
+);
+```
+
+---
+
+# IMPORTANT STORAGE RULE
+
+## Store ONLY 5-Minute Raw Data
+
+Correct architecture:
+
+```text
+Store:
+5m snapshots only
+```
+
+Do NOT separately store:
+
+* 15m
+* 30m
+* 1hr
+
+These must be calculated dynamically.
+
+---
+
+# Timeframe Logic
+
+## Interval Map
+
+```python
+interval_map = {
+    "5m": 1,
+    "15m": 3,
+    "30m": 6,
+    "1hr": 12
+}
+```
+
+---
+
+## Example
+
+### Stored Raw Data
+
+| Time  | OI  |
+| ----- | --- |
+| 09:15 | 100 |
+| 09:20 | 110 |
+| 09:25 | 130 |
+| 09:30 | 150 |
+
+---
+
+## 5m Calculation
+
+```text
+150 - 130 = 20
+```
+
+---
+
+## 15m Calculation
+
+```text
+150 - 100 = 50
+```
+
+---
+
+## 30m Calculation
+
+Uses:
+
+```text
+current - 6 buckets back
+```
+
+---
+
+## 1hr Calculation
+
+Uses:
+
+```text
+current - 12 buckets back
+```
+
+---
+
+# Multi-Page Design
+
+## Browser Tabs
+
+### Tab 1
+
+```text
+http://localhost:8000/atm
+```
+
+Live ATM monitoring.
+
+---
+
+### Tab 2
+
+```text
+http://localhost:8000/itm-otm
+```
+
+Live ITM/OTM monitoring.
+
+---
+
+# UI Design Rules
+
+## Layout
+
+### Left Side
+
+CE tables
+
+### Right Side
+
+PE tables
+
+---
+
+## Colors
+
+### Bullish
+
+Green
+
+### Bearish
+
+Red
+
+### Neutral
+
+Gray
+
+### Background
+
+Dark theme preferred
+
+---
+
+# Live Update System
+
+## Frontend Polling
+
+Every:
+
+```javascript
+5000 ms
+```
+
+Frontend calls backend API.
+
+---
+
+## Example
+
+```javascript
+setInterval(fetchData, 5000)
+```
+
+---
+
+# API Design
+
+## ATM Endpoint
+
+```text
+/api/atm?interval=15m
+```
+
+Returns:
+
+* ATM CE
+* ATM PE
+* buildup
+* volume
+* Greeks
+
+---
+
+## ITM OTM Endpoint
+
+```text
+/api/itm-otm?interval=30m
+```
+
+Returns:
+
+* ITM strikes
+* OTM strikes
+* Greeks
+* buildup
+
+---
+
+# Frontend Timeframe Selector
+
+## Dropdown
+
+```html
+<select id="timeframe">
+  <option>5m</option>
+  <option>15m</option>
+  <option>30m</option>
+  <option>1hr</option>
+</select>
+```
+
+---
+
+## Behavior
+
+If user selects:
+
+```text
+15m
+```
+
+ALL tables must update to:
+
+* 15m buildup
+* 15m volume change
+* 15m Greeks trend
+
+---
+
+# Greeks Rules
+
+## Greeks Used
+
+### Delta
+
+Momentum strength
+
+### Gamma
+
+Premium acceleration
+
+### IV
+
+Volatility expectation
+
+---
+
+# Gamma Interpretation Rules
+
+| Gamma       | Meaning          |
+| ----------- | ---------------- |
+| < 0.004     | Slow market      |
+| 0.004–0.008 | Healthy trend    |
+| 0.008–0.012 | Strong expansion |
+| > 0.012     | Explosive        |
+
+---
+
+# Delta Interpretation Rules
+
+| Delta     | Meaning    |
+| --------- | ---------- |
+| 0.10–0.25 | Far OTM    |
+| 0.40–0.55 | ATM        |
+| 0.65–0.80 | Strong ITM |
+| 0.90+     | Deep ITM   |
+
+---
+
+# Build-Up Logic
+
+## Long Build-up
+
+```text
+Price ↑ + OI ↑
+```
+
+---
+
+## Short Build-up
+
+```text
+Price ↓ + OI ↑
+```
+
+---
+
+## Short Covering
+
+```text
+Price ↑ + OI ↓
+```
+
+---
+
+## Long Unwinding
+
+```text
+Price ↓ + OI ↓
+```
+
+---
+
+# Smart Money Interpretation Rules
+
+## Bullish Continuation
+
+Conditions:
+
+* CE short covering
+* Delta rising
+* Gamma high
+* IV expanding
+
+---
+
+## Bearish Continuation
+
+Conditions:
+
+* PE short covering
+* PE delta rising
+* Gamma high
+
+---
+
+## Trap Warning
+
+Conditions:
+
+* Price breakout
+* Delta flat
+* Gamma weak
+* IV weak
+
+---
+
+# Historical Replay Rules
+
+Dashboard must:
+
+* show old sessions
+* load any date
+* replay expiry days
+* compare previous sessions
+
+---
+
+# Performance Rules
+
+## DO NOT
+
+* rerender entire page
+* reload full HTML
+* fetch unnecessary data
+
+---
+
+## ALWAYS
+
+* update only table body
+* cache historical data
+* keep polling lightweight
+
+---
+
+# Latency Rules
+
+## Expected Frontend Latency
+
+| System    | Latency      |
+| --------- | ------------ |
+| Streamlit | 500ms–3000ms |
+| HTML + JS | 50ms–300ms   |
+
+---
+
+# Future Features
+
+## Phase 2
+
+Add:
+
+* TradingView charts
+* heatmaps
+* gamma exposure
+* trap detector
+* liquidity maps
+* alerts
+* sound notifications
+
+---
+
+# Future Database Improvements
+
+Later migrate:
+
+SQLite → PostgreSQL
+
+if:
+
+* multi-user
+* cloud deployment
+* huge historical data
+
+---
+
+# Deployment Options
+
+## Localhost
+
+```text
+http://localhost:8000
+```
+
+---
+
+## VPS
+
+Deploy on:
+
+* AWS
+* DigitalOcean
+* Render
+* Railway
+
+---
+
+# Recommended Development Order
+
+## Phase 1
+
+Build:
+
+* backend collector
+* SQLite storage
+* ATM HTML page
+
+---
+
+## Phase 2
+
+Add:
+
+* ITM/OTM page
+* multi-timeframe APIs
+
+---
+
+## Phase 3
+
+Add:
+
+* Greeks
+* IV
+* gamma logic
+
+---
+
+## Phase 4
+
+Add:
+
+* charts
+* alerts
+* replay mode
+
+---
+
+# Final Goal
+
+Professional institutional-style realtime options dashboard with:
+
+* low latency
+* multiple tabs
+* historical replay
+* Greeks analysis
+* smart money interpretation
+* trap detection
+* multi-timeframe monitoring
+
+without Streamlit limitations.
