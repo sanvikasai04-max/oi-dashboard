@@ -67,9 +67,11 @@ def background_collector():
 
         try:
 
-            collect_and_store()
+            snapshot_saved = collect_and_store()
 
-            print("Snapshot saved successfully")
+            if snapshot_saved:
+
+                print("Snapshot saved successfully")
 
         except Exception as e:
 

@@ -2,6 +2,12 @@ import requests
 import json
 import datetime as dt
 import time
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    ZoneInfo = None
+
 from app.config import (
     CLIENT_ID,
     ACCESS_TOKEN,
@@ -10,6 +16,32 @@ from app.config import (
 )
 
 from app.database import save_snapshot
+
+# =========================================
+# MARKET HOURS
+# =========================================
+
+MARKET_CLOSE_TIME = dt.time(15, 30)
+
+if ZoneInfo is not None:
+    IST_TIMEZONE = ZoneInfo("Asia/Kolkata")
+else:
+    IST_TIMEZONE = dt.timezone(
+        dt.timedelta(hours=5, minutes=30)
+    )
+
+
+def get_ist_now():
+
+    return dt.datetime.now(IST_TIMEZONE)
+
+
+def is_after_market_close(now=None):
+
+    if now is None:
+        now = get_ist_now()
+
+    return now.time() >= MARKET_CLOSE_TIME
 
 # =========================================
 # GET EXPIRY
@@ -113,12 +145,23 @@ def fetch_option_chain():
 
 def collect_and_store():
 
+    now = get_ist_now()
+
+    if is_after_market_close(now):
+
+        print(
+            "Market closed after 15:30 IST. "
+            "Skipping new snapshot save."
+        )
+
+        return False
+
     option_chain, spot = fetch_option_chain()
 
     if option_chain is None:
-        return
+        return False
 
-    timestamp = dt.datetime.now().strftime(
+    timestamp = now.strftime(
         "%Y-%m-%d %H:%M:%S"
     )
 
@@ -186,3 +229,5 @@ def collect_and_store():
         save_snapshot(snapshot)
 
     print(f"Saved snapshot at {timestamp}")
+
+    return True
