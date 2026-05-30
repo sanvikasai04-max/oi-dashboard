@@ -138,12 +138,12 @@ def generate_oi_table(
     df = df.sort_values("timestamp")
 
     # =====================================
-    # CREATE 5-MIN BUCKET
+    # CREATE SELECTED TIMEFRAME BUCKET
     # =====================================
 
     df["bucket"] = (
         df["timestamp"]
-        .dt.floor("5min")
+        .dt.floor(f"{bucket_minutes}min")
     )
 
     # =====================================
@@ -186,7 +186,7 @@ def generate_oi_table(
     grouped = grouped.reset_index()
     now = pd.Timestamp.now()
 
-    current_bucket = now.floor("5min")
+    current_bucket = now.floor(f"{bucket_minutes}min")
 
     grouped = grouped[
         grouped["bucket"] < current_bucket
@@ -197,15 +197,15 @@ def generate_oi_table(
     # LOOP
     # =====================================
 
-    for i in range(lookback, len(grouped)):
+    for i in range(1, len(grouped)):
 
         current = grouped.iloc[i]
 
         # =================================
-        # EXACT LOOKBACK ROW
+        # PREVIOUS COMPLETED TIMEFRAME BUCKET
         # =================================
 
-        past = grouped.iloc[i - lookback]
+        past = grouped.iloc[i - 1]
 
         # =================================
         # OPTION TYPE
@@ -328,10 +328,9 @@ def generate_oi_table(
 
         rows.append({
 
-            "time": (
-                f"{past['bucket'].strftime('%H:%M')}"
-                f" - "
-                f"{current['bucket'].strftime('%H:%M')}"
+            "time": format_bucket_time(
+                current["bucket"],
+                lookback
             ),
 
             "buildup": buildup,
