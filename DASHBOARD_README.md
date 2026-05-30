@@ -2,6 +2,8 @@
 
 This project is a FastAPI-based Nifty option-chain dashboard. It stores option-chain snapshots in SQLite and shows ATM, OTM, and ITM option data in browser dashboards with live refresh.
 
+![OI Dashboard Preview](docs/assets/dashboard-preview.png)
+
 ## What This Dashboard Shows
 
 - Spot price

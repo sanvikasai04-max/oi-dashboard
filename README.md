@@ -1,5 +1,7 @@
 # Nifty_Live_OI_GreeksData
 
+![OI Dashboard Preview](docs/assets/dashboard-preview.png)
+
 ```bash
 pip install -r requirements.txt
 ```
