@@ -237,13 +237,15 @@ function getBuildClass(buildup, optionType) {
 
 function getPctClass(value) {
 
-    if (value > 15) {
+    const numericValue = Number(value);
+
+    if (numericValue > 0) {
 
         return "pct-green";
 
     }
 
-    if (value < -15) {
+    if (numericValue < 0) {
 
         return "pct-red";
 

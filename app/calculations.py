@@ -50,6 +50,26 @@ def classify_build_up(price_change, oi_change):
     return "No Signal"
 
 # =========================================
+# CALCULATE PERCENT CHANGE
+# =========================================
+
+def calculate_percent_change(current_value, previous_value):
+
+    if current_value == previous_value:
+
+        return 0
+
+    if previous_value == 0:
+
+        return 0
+
+    return round(
+        ((current_value - previous_value)
+        / abs(previous_value)) * 100,
+        2
+    )
+
+# =========================================
 # GET ATM STRIKE
 # =========================================
 
@@ -284,44 +304,32 @@ def generate_oi_table(
         # RATE OF CHANGE
         # =================================
 
-        delta_change = 0
+        display_delta = round(delta, 2)
 
-        gamma_change = 0
+        display_prev_delta = round(prev_delta, 2)
 
-        iv_change = 0
+        display_gamma = round(gamma, 4)
 
-        if abs(prev_delta) > 0.01:
+        display_prev_gamma = round(prev_gamma, 4)
 
-            delta_change = round(
+        display_iv = round(iv, 2)
 
-                ((delta - prev_delta)
-                / abs(prev_delta)) * 100,
+        display_prev_iv = round(prev_iv, 2)
 
-                2
+        delta_change = calculate_percent_change(
+            display_delta,
+            display_prev_delta
+        )
 
-            )
+        gamma_change = calculate_percent_change(
+            display_gamma,
+            display_prev_gamma
+        )
 
-        if abs(prev_gamma) > 0.00001:
-
-            gamma_change = round(
-
-                ((gamma - prev_gamma)
-                / abs(prev_gamma)) * 100,
-
-                2
-
-            )
-
-        if prev_iv != 0:
-
-            iv_change = round(
-
-                ((iv - prev_iv)
-                / abs(prev_iv)) * 100,
-
-                2
-
-            )
+        iv_change = calculate_percent_change(
+            display_iv,
+            display_prev_iv
+        )
 
         # =================================
         # APPEND ROW
@@ -340,15 +348,15 @@ def generate_oi_table(
                 volume_change
             ),
 
-            "delta": round(delta, 2),
+            "delta": display_delta,
 
             "delta_change": delta_change,
 
-            "gamma": round(gamma, 4),
+            "gamma": display_gamma,
 
             "gamma_change": gamma_change,
 
-            "iv": round(iv, 2),
+            "iv": display_iv,
 
             "iv_change": iv_change
 
