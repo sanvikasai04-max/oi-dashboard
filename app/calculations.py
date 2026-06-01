@@ -260,6 +260,7 @@ def generate_oi_table(
             iv = current["call_iv_last"]
 
             prev_iv = past["call_iv_last"]
+
         else:
 
             prev_bucket = grouped.iloc[i - 1]
@@ -347,6 +348,8 @@ def generate_oi_table(
             "volume": format_volume(
                 volume_change
             ),
+
+            "oi_change": int(oi_change),
 
             "delta": display_delta,
 

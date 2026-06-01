@@ -5,8 +5,8 @@ import re
 # DHAN CONFIG
 # =========================================
 
-CLIENT_ID = os.getenv("DHAN_CLIENT_ID", "")
-ACCESS_TOKEN = os.getenv("DHAN_ACCESS_TOKEN", "")
+CLIENT_ID = "1107485546"
+ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzgwMzcxODYxLCJpYXQiOjE3ODAyODU0NjEsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTA3NDg1NTQ2In0.YcbTBwx3j1llTWjFj9KVMvE_FM3l9VkqB0ny8bu28JEF0rDTdGntcI7qk03vA8Wk4iwvzRkl1hx1nHrBxHwp0g"
 # =========================================
 # APP SETTINGS
 # =========================================
@@ -31,9 +31,9 @@ ITM_OTM_DISTANCE = 1
 
 today = dt.datetime.now().strftime("%Y_%m_%d")
 
-#DATABASE_URL = f"sqlite:///./oi_{today}.db"
+DATABASE_URL = f"sqlite:///./oi_{today}.db"
 
-DATABASE_URL = "sqlite:///./oi_2026_05_25.db"
+#DATABASE_URL = "sqlite:///./oi_2026_05_25.db"
 
 
 def get_data_date():

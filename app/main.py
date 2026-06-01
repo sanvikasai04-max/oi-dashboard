@@ -86,15 +86,15 @@ def background_collector():
 # START COLLECTOR ON STARTUP
 # =========================================
 
-# @app.on_event("startup")
-# def start_collector():
+@app.on_event("startup")
+def start_collector():
 
-#     collector_thread = threading.Thread(
-#         target=background_collector,
-#         daemon=True
-#     )
+    collector_thread = threading.Thread(
+        target=background_collector,
+        daemon=True
+    )
 
-#     collector_thread.start()
+    collector_thread.start()
 
 # =========================================
 # HOME
@@ -131,4 +131,16 @@ def itm_page(request: Request):
     return templates.TemplateResponse(
         request,
         "itm.html"
+    )
+
+# =========================================
+# ATM GREEKS CHARTS PAGE
+# =========================================
+
+@app.get("/greeks")
+def greeks_page(request: Request):
+
+    return templates.TemplateResponse(
+        request,
+        "greeks.html"
     )

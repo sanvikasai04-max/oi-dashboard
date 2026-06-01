@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h3>ATM Greeks Charts</h3>
+
+<div class="mb-3">
+    <span class="badge-green">Interval: 5m</span>
+    <span class="badge-yellow ms-2">Spot: <strong id="spot-price">0</strong></span>
+    <span class="badge-blue ms-2">Last Update: <strong id="last-update">--</strong></span>
+</div>
+
+<div class="grid-container">
+
+    <div class="dashboard-card p-3">
+        <h5>ATM Delta</h5>
+        <canvas id="delta-chart"></canvas>
+    </div>
+
+    <div class="dashboard-card p-3">
+        <h5>ATM Gamma</h5>
+        <canvas id="gamma-chart"></canvas>
+    </div>
+
+    <div class="dashboard-card p-3">
+        <h5>ATM IV</h5>
+        <canvas id="iv-chart"></canvas>
+    </div>
+
+    <div class="dashboard-card p-3">
+        <h5>ATM CE / PE Build-up OI Change</h5>
+        <canvas id="buildup-chart"></canvas>
+    </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="/static/js/greeks.js?v=20260531"></script>
+
+{% endblock %}
