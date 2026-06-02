@@ -11,7 +11,10 @@ from app.calculations import (
     get_atm_strike,
     generate_oi_table
 )
-from app.config import get_data_date
+from app.config import (
+    get_data_date,
+    STRIKE_STEP
+)
 
 router = APIRouter()
 
@@ -147,5 +150,109 @@ def get_atm_data(interval: str = "5m"):
         }
 
     finally:
+        db.close()
 
+
+@router.get("/api/greeks")
+
+def get_greeks_data(
+    interval: str = "5m",
+    strike: int = None
+):
+
+    db: Session = SessionLocal()
+
+    try:
+
+        rows = db.query(OISnapshot).all()
+
+        if not rows:
+
+            return {
+                "error": "No data found"
+            }
+
+        data = []
+
+        for row in rows:
+
+            data.append({
+
+                "timestamp": row.timestamp,
+
+                "strike": row.strike,
+
+                "spot": row.spot,
+
+                "call_oi": row.call_oi,
+                "put_oi": row.put_oi,
+
+                "call_price": row.call_price,
+                "put_price": row.put_price,
+
+                "call_volume": row.call_volume,
+                "put_volume": row.put_volume,
+
+                "call_delta": row.call_delta,
+                "put_delta": row.put_delta,
+
+                "call_gamma": row.call_gamma,
+                "put_gamma": row.put_gamma,
+
+                "call_iv": row.call_iv,
+                "put_iv": row.put_iv
+
+            })
+
+        df = pd.DataFrame(data)
+
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df = df.sort_values("timestamp")
+
+        opening = df.iloc[0]
+        latest = df.iloc[-1]
+
+        spot = latest["spot"]
+        opening_spot = opening["spot"]
+        opening_atm = get_atm_strike(opening_spot)
+
+        strike_options = [
+            opening_atm + i
+            for i in range(-300, 301, STRIKE_STEP)
+        ]
+
+        if strike is None or strike not in strike_options:
+            strike = opening_atm
+
+        ce_data = generate_oi_table(
+            history_df=df,
+            strike=strike,
+            option_type="CE",
+            interval_name=interval
+        )
+
+        pe_data = generate_oi_table(
+            history_df=df,
+            strike=strike,
+            option_type="PE",
+            interval_name=interval
+        )
+
+        latest_timestamp = str(latest["timestamp"])
+        earliest_timestamp = str(opening["timestamp"])
+
+        return {
+            "spot": spot,
+            "opening_atm": opening_atm,
+            "strike": strike,
+            "strike_options": strike_options,
+            "interval": interval,
+            "last_update": latest_timestamp,
+            "earliest_update": earliest_timestamp,
+            "data_date": get_data_date(),
+            "ce_data": ce_data,
+            "pe_data": pe_data
+        }
+
+    finally:
         db.close()

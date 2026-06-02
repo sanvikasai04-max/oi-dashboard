@@ -2,39 +2,109 @@
 
 {% block content %}
 
-<h3>ATM Greeks Charts</h3>
+<h3>Fixed-Strike Greeks Dashboard</h3>
 
 <div class="mb-3">
     <span class="badge-green">Interval: 5m</span>
     <span class="badge-yellow ms-2">Spot: <strong id="spot-price">0</strong></span>
-    <span class="badge-blue ms-2">Last Update: <strong id="last-update">--</strong></span>
+    <span class="badge-blue ms-2">Opening ATM: <strong id="opening-atm">--</strong></span>
 </div>
 
 <div class="grid-container">
 
     <div class="dashboard-card p-3">
-        <h5>ATM Delta</h5>
-        <canvas id="delta-chart"></canvas>
+        <h5 id="ce-atm-title">ATM CE</h5>
+        <canvas id="ce-atm-chart"></canvas>
     </div>
 
     <div class="dashboard-card p-3">
-        <h5>ATM Gamma</h5>
-        <canvas id="gamma-chart"></canvas>
+        <h5 id="pe-atm-title">ATM PE</h5>
+        <canvas id="pe-atm-chart"></canvas>
     </div>
 
     <div class="dashboard-card p-3">
-        <h5>ATM IV</h5>
-        <canvas id="iv-chart"></canvas>
+        <h5 id="ce-plus50-title">ATM +50 CE</h5>
+        <canvas id="ce-plus50-chart"></canvas>
     </div>
 
     <div class="dashboard-card p-3">
-        <h5>ATM CE / PE Build-up OI Change</h5>
-        <canvas id="buildup-chart"></canvas>
+        <h5 id="pe-plus50-title">ATM +50 PE</h5>
+        <canvas id="pe-plus50-chart"></canvas>
+    </div>
+
+    <div class="dashboard-card p-3">
+        <h5 id="ce-plus100-title">ATM +100 CE</h5>
+        <canvas id="ce-plus100-chart"></canvas>
+    </div>
+
+    <div class="dashboard-card p-3">
+        <h5 id="pe-plus100-title">ATM +100 PE</h5>
+        <canvas id="pe-plus100-chart"></canvas>
+    </div>
+
+    <div class="dashboard-card p-3">
+        <h5 id="ce-plus150-title">ATM +150 CE</h5>
+        <canvas id="ce-plus150-chart"></canvas>
+    </div>
+
+    <div class="dashboard-card p-3">
+        <h5 id="pe-plus150-title">ATM +150 PE</h5>
+        <canvas id="pe-plus150-chart"></canvas>
+    </div>
+
+    <div class="dashboard-card p-3">
+        <h5 id="ce-plus200-title">ATM +200 CE</h5>
+        <canvas id="ce-plus200-chart"></canvas>
+    </div>
+
+    <div class="dashboard-card p-3">
+        <h5 id="pe-plus200-title">ATM +200 PE</h5>
+        <canvas id="pe-plus200-chart"></canvas>
+    </div>
+
+    <div class="dashboard-card p-3">
+        <h5 id="ce-minus50-title">ATM -50 CE</h5>
+        <canvas id="ce-minus50-chart"></canvas>
+    </div>
+
+    <div class="dashboard-card p-3">
+        <h5 id="pe-minus50-title">ATM -50 PE</h5>
+        <canvas id="pe-minus50-chart"></canvas>
+    </div>
+
+    <div class="dashboard-card p-3">
+        <h5 id="ce-minus100-title">ATM -100 CE</h5>
+        <canvas id="ce-minus100-chart"></canvas>
+    </div>
+
+    <div class="dashboard-card p-3">
+        <h5 id="pe-minus100-title">ATM -100 PE</h5>
+        <canvas id="pe-minus100-chart"></canvas>
+    </div>
+
+    <div class="dashboard-card p-3">
+        <h5 id="ce-minus150-title">ATM -150 CE</h5>
+        <canvas id="ce-minus150-chart"></canvas>
+    </div>
+
+    <div class="dashboard-card p-3">
+        <h5 id="pe-minus150-title">ATM -150 PE</h5>
+        <canvas id="pe-minus150-chart"></canvas>
+    </div>
+
+    <div class="dashboard-card p-3">
+        <h5 id="ce-minus200-title">ATM -200 CE</h5>
+        <canvas id="ce-minus200-chart"></canvas>
+    </div>
+
+    <div class="dashboard-card p-3">
+        <h5 id="pe-minus200-title">ATM -200 PE</h5>
+        <canvas id="pe-minus200-chart"></canvas>
     </div>
 
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="/static/js/greeks.js?v=20260531"></script>
+<script src="/static/js/greeks.js?v=20260603"></script>
 
 {% endblock %}

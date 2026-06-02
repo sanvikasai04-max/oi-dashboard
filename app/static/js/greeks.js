@@ -1,109 +1,107 @@
+const STRIKE_PRESETS = [
+    { offset: 0, label: "ATM", id: "atm" },
+    { offset: 50, label: "ATM +50", id: "plus50" },
+    { offset: 100, label: "ATM +100", id: "plus100" },
+    { offset: 150, label: "ATM +150", id: "plus150" },
+    { offset: 200, label: "ATM +200", id: "plus200" },
+    { offset: -50, label: "ATM -50", id: "minus50" },
+    { offset: -100, label: "ATM -100", id: "minus100" },
+    { offset: -150, label: "ATM -150", id: "minus150" },
+    { offset: -200, label: "ATM -200", id: "minus200" }
+];
+
 async function fetchGreeksData() {
     try {
-        const response = await fetch("/api/atm?interval=5m");
-        const data = await response.json();
+        const baseResponse = await fetch(`/api/greeks?interval=5m`);
+        const baseData = await baseResponse.json();
 
-        if (data.error) {
-            console.error("GREKS PAGE ERROR:", data.error);
+        if (baseData.error) {
+            console.error("GREKS PAGE ERROR:", baseData.error);
             return;
         }
 
-        document.getElementById("spot-price").innerText = Number(data.spot).toFixed(2);
-        document.getElementById("last-update").innerText = data.last_update || "--";
+        const openingAtm = baseData.opening_atm;
+        document.getElementById("spot-price").innerText = Number(baseData.spot).toFixed(2);
+        document.getElementById("opening-atm").innerText = openingAtm;
 
-        const ceData = data.ce_data.slice().reverse();
-        const peData = data.pe_data.slice().reverse();
+        const chartRequests = STRIKE_PRESETS.map(preset => {
+            const strike = openingAtm + preset.offset;
+            return fetch(`/api/greeks?interval=5m&strike=${strike}`)
+                .then(res => res.json())
+                .then(data => ({ preset, strike, data }));
+        });
 
-        const labels = ceData.map(row => row.time);
+        const strikeResults = await Promise.all(chartRequests);
 
-        const deltaSeries = [
-            {
-                label: "CE Delta",
-                data: ceData.map(row => row.delta),
-                borderColor: "#22c55e",
-                backgroundColor: "rgba(34, 197, 94, 0.2)",
-                fill: false,
-                tension: 0.3,
-                pointRadius: 2
-            },
-            {
-                label: "PE Delta",
-                data: peData.map(row => row.delta),
-                borderColor: "#ef4444",
-                backgroundColor: "rgba(239, 68, 68, 0.2)",
-                fill: false,
-                tension: 0.3,
-                pointRadius: 2
+        strikeResults.forEach(result => {
+            if (result.data.error) {
+                console.error(`GREKS PAGE ERROR for strike ${result.strike}:`, result.data.error);
+                return;
             }
-        ];
 
-        const gammaSeries = [
-            {
-                label: "CE Gamma",
-                data: ceData.map(row => row.gamma),
-                borderColor: "#60a5fa",
-                backgroundColor: "rgba(96, 165, 250, 0.2)",
-                fill: false,
-                tension: 0.3,
-                pointRadius: 2
-            },
-            {
-                label: "PE Gamma",
-                data: peData.map(row => row.gamma),
-                borderColor: "#fbbf24",
-                backgroundColor: "rgba(251, 191, 36, 0.2)",
-                fill: false,
-                tension: 0.3,
-                pointRadius: 2
+            const ce = result.data.ce_data.slice().reverse();
+            const pe = result.data.pe_data.slice().reverse();
+            const labels = ce.map(row => row.time);
+
+            const ceTitle = document.getElementById(`ce-${result.preset.id}-title`);
+            if (ceTitle) {
+                ceTitle.innerText = `CE ${result.preset.label} (${result.strike})`;
             }
-        ];
-
-        const ivSeries = [
-            {
-                label: "CE IV",
-                data: ceData.map(row => row.iv),
-                borderColor: "#a855f7",
-                backgroundColor: "rgba(168, 85, 247, 0.2)",
-                fill: false,
-                tension: 0.3,
-                pointRadius: 2
-            },
-            {
-                label: "PE IV",
-                data: peData.map(row => row.iv),
-                borderColor: "#22d3ee",
-                backgroundColor: "rgba(34, 211, 238, 0.2)",
-                fill: false,
-                tension: 0.3,
-                pointRadius: 2
+            const peTitle = document.getElementById(`pe-${result.preset.id}-title`);
+            if (peTitle) {
+                peTitle.innerText = `PE ${result.preset.label} (${result.strike})`;
             }
-        ];
 
-        const buildupSeries = [
-            {
-                label: "CE OI Change",
-                data: ceData.map(row => row.oi_change || 0),
-                borderColor: "#22c55e",
-                backgroundColor: "rgba(34, 197, 94, 0.2)",
-                fill: false,
-                tension: 0.3,
-                pointRadius: 2
-            },
-            {
-                label: "PE OI Change",
-                data: peData.map(row => row.oi_change || 0),
-                borderColor: "#ef4444",
-                backgroundColor: "rgba(239, 68, 68, 0.2)",
-                fill: false,
-                tension: 0.3,
-                pointRadius: 2
-            }
-        ];
+            renderLineChart(`ce-${result.preset.id}-chart`, labels, [
+                {
+                    label: "CE Delta",
+                    data: ce.map(row => row.delta),
+                    borderColor: "#22c55e",
+                    backgroundColor: "rgba(34, 197, 94, 0.2)",
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 2,
+                    borderWidth: 2,
+                    yAxisID: "delta"
+                },
+                {
+                    label: "CE Gamma",
+                    data: ce.map(row => row.gamma),
+                    borderColor: "#60a5fa",
+                    backgroundColor: "rgba(96, 165, 250, 0.2)",
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 2,
+                    borderWidth: 3,
+                    yAxisID: "gamma"
+                }
+            ], `CE ${result.preset.label} (${result.strike})`);
 
-        renderLineChart("delta-chart", labels, deltaSeries, "ATM Delta");
-        renderLineChart("gamma-chart", labels, gammaSeries, "ATM Gamma");
-        renderLineChart("iv-chart", labels, ivSeries, "ATM IV");
-        renderLineChart("buildup-chart", labels, buildupSeries, "ATM CE / PE OI Change");
+            renderLineChart(`pe-${result.preset.id}-chart`, labels, [
+                {
+                    label: "PE Delta",
+                    data: pe.map(row => row.delta),
+                    borderColor: "#ef4444",
+                    backgroundColor: "rgba(239, 68, 68, 0.2)",
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 2,
+                    borderWidth: 2,
+                    yAxisID: "delta"
+                },
+                {
+                    label: "PE Gamma",
+                    data: pe.map(row => row.gamma),
+                    borderColor: "#fbbf24",
+                    backgroundColor: "rgba(251, 191, 36, 0.2)",
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 2,
+                    borderWidth: 3,
+                    yAxisID: "gamma"
+                }
+            ], `PE ${result.preset.label} (${result.strike})`);
+        });
     }
     catch (error) {
         console.error("GREKS PAGE ERROR:", error);
@@ -111,9 +109,17 @@ async function fetchGreeksData() {
 }
 
 function renderLineChart(canvasId, labels, datasets, title) {
-    const ctx = document.getElementById(canvasId).getContext("2d");
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) {
+        return;
+    }
 
-    new Chart(ctx, {
+    const existingChart = Chart.getChart(canvas);
+    if (existingChart) {
+        existingChart.destroy();
+    }
+
+    new Chart(canvas, {
         type: "line",
         data: {
             labels,
@@ -148,11 +154,34 @@ function renderLineChart(canvasId, labels, datasets, title) {
                         color: "rgba(255,255,255,0.08)"
                     }
                 },
-                y: {
+                delta: {
+                    type: "linear",
+                    position: "left",
+                    title: {
+                        display: true,
+                        text: "Delta",
+                        color: "#fff"
+                    },
                     ticks: {
                         color: "#fff"
                     },
                     grid: {
+                        color: "rgba(255,255,255,0.08)"
+                    }
+                },
+                gamma: {
+                    type: "linear",
+                    position: "right",
+                    title: {
+                        display: true,
+                        text: "Gamma",
+                        color: "#fff"
+                    },
+                    ticks: {
+                        color: "#fff"
+                    },
+                    grid: {
+                        drawOnChartArea: false,
                         color: "rgba(255,255,255,0.08)"
                     }
                 }
@@ -161,4 +190,8 @@ function renderLineChart(canvasId, labels, datasets, title) {
     });
 }
 
-window.addEventListener("DOMContentLoaded", fetchGreeksData);
+window.addEventListener("DOMContentLoaded", () => {
+    fetchGreeksData();
+    setInterval(fetchGreeksData, 5 * 60 * 1000);
+});
+
