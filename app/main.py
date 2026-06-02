@@ -86,15 +86,15 @@ def background_collector():
 # START COLLECTOR ON STARTUP
 # =========================================
 
-@app.on_event("startup")
-def start_collector():
+# @app.on_event("startup")
+# def start_collector():
 
-    collector_thread = threading.Thread(
-        target=background_collector,
-        daemon=True
-    )
+#     collector_thread = threading.Thread(
+#         target=background_collector,
+#         daemon=True
+#     )
 
-    collector_thread.start()
+#     collector_thread.start()
 
 # =========================================
 # HOME

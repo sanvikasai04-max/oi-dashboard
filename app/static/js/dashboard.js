@@ -58,6 +58,9 @@ async function fetchDashboardData() {
             console.warn("No dates found in response");
         }
 
+        document.getElementById("atm-ce-strike").innerText =
+            data.atm;
+
         document.getElementById("atm-pe-strike").innerText =
             data.atm;
 
@@ -133,6 +136,14 @@ function fillTable(bodyId, rows, optionType) {
             </td>
 
             <td>${row.volume}</td>
+
+            <td>
+                ${formatOIChange(row.oi_change)}
+                <br>
+                <span class="${getPctClass(row.fresh_entry_ratio)}">
+                    (${row.fresh_entry_ratio}%)
+                </span>
+            </td>
 
            <td>
 
@@ -231,6 +242,28 @@ function getBuildClass(buildup, optionType) {
 
     return "";
 
+}
+
+function formatOIChange(value) {
+
+    const num = Number(value);
+
+    if (Number.isNaN(num)) {
+        return value;
+    }
+
+    const absValue = Math.abs(num);
+    let formatted;
+
+    if (absValue >= 1e7) {
+        formatted = `${(num / 1e7).toFixed(2).replace(/\.00$|\.?0+$/, '')} cr`;
+    } else if (absValue >= 1e5) {
+        formatted = `${(num / 1e5).toFixed(2).replace(/\.00$|\.?0+$/, '')} lakh`;
+    } else {
+        formatted = num.toString();
+    }
+
+    return formatted;
 }
 
 function getPctClass(value) {

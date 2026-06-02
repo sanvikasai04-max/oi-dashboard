@@ -251,6 +251,11 @@ def generate_oi_table(
             )
             delta = current["call_delta_last"]
 
+            fresh_entry_ratio = (
+                round((oi_change / volume_change) * 100, 2)
+                if volume_change else 0
+            )
+
             prev_delta = past["call_delta_last"]
 
             gamma = current["call_gamma_last"]
@@ -281,6 +286,11 @@ def generate_oi_table(
             )
 
             delta = current["put_delta_last"]
+
+            fresh_entry_ratio = (
+                round((oi_change / volume_change) * 100, 2)
+                if volume_change else 0
+            )
 
             prev_delta = past["put_delta_last"]
 
@@ -350,6 +360,7 @@ def generate_oi_table(
             ),
 
             "oi_change": int(oi_change),
+            "fresh_entry_ratio": fresh_entry_ratio,
 
             "delta": display_delta,
 
