@@ -167,31 +167,22 @@ def generate_oi_table(
     )
 
     # =====================================
-    # DROP BAD SNAPSHOTS AND PICK BEST ROW PER BUCKET
+    # DROP BAD SNAPSHOTS AND PICK LAST VALID ROW PER BUCKET
     # =====================================
-
-    df["total_oi"] = (
-        df["call_oi"].fillna(0) +
-        df["put_oi"].fillna(0)
-    )
-    df["total_volume"] = (
-        df["call_volume"].fillna(0) +
-        df["put_volume"].fillna(0)
-    )
 
     df = df[~(
         (df["call_price"] == 0) &
         (df["put_price"] == 0) &
-        (df["total_oi"] == 0)
+        ((df["call_oi"].fillna(0) + df["put_oi"].fillna(0)) == 0)
     )]
 
     df = df.sort_values(
-        ["bucket", "total_oi", "total_volume", "timestamp"],
-        ascending=[True, False, False, False]
+        ["bucket", "timestamp"],
+        ascending=[True, True]
     )
     df = df.drop_duplicates(
         subset=["bucket"],
-        keep="first"
+        keep="last"
     )
 
     # =====================================
