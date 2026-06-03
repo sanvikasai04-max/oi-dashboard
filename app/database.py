@@ -155,10 +155,26 @@ def save_snapshot(data):
 
     try:
 
+        # Avoid inserting duplicate snapshots for the same timestamp/expiry/strike.
+        # If a snapshot with the exact timestamp, expiry and strike exists,
+        # update it instead of inserting a new row. This prevents small
+        # outlier rows (same timestamp) from creating conflicting data
+        # that later breaks bucket aggregation.
+
+        existing = db.query(OISnapshot).filter_by(
+            timestamp=data.get("timestamp"),
+            expiry=data.get("expiry"),
+            strike=data.get("strike")
+        ).first()
+
+        if existing:
+            for key, val in data.items():
+                setattr(existing, key, val)
+            db.commit()
+            return
+
         snapshot = OISnapshot(**data)
-
         db.add(snapshot)
-
         db.commit()
 
     except Exception as e:
