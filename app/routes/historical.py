@@ -6,6 +6,7 @@ from app.database import (
     SessionLocal,
     OISnapshot
 )
+from app.config import TRACK_EXPIRY
 
 router = APIRouter()
 
@@ -27,6 +28,7 @@ def get_historical_data(limit: int = 500):
 
         rows = (
             db.query(OISnapshot)
+            .filter(OISnapshot.expiry == TRACK_EXPIRY)
             .order_by(OISnapshot.id.desc())
             .limit(limit)
             .all()
@@ -53,6 +55,9 @@ def get_historical_data(limit: int = 500):
                 "strike": row.strike,
 
                 "spot": row.spot,
+
+                "call_ltp": row.call_price,
+                "put_ltp": row.put_price,
 
                 "call_oi": row.call_oi,
                 "put_oi": row.put_oi,

@@ -93,6 +93,7 @@ def fetch_option_chain():
 
     option_chain = None
     spot = None
+    used_expiry = None
 
     expiries = get_next_n_expiries(2)
 
@@ -129,16 +130,17 @@ def fetch_option_chain():
 
                 option_chain = data["data"]["oc"]
                 spot = data["data"]["last_price"]
+                used_expiry = expiry
 
                 print("Using expiry:", expiry)
 
-                return option_chain, spot
+                return option_chain, spot, used_expiry
 
         except Exception as e:
 
             print("FETCH ERROR:", e)
 
-    return None, None
+    return None, None, None
 # =========================================
 # SAVE MARKET SNAPSHOT
 # =========================================
@@ -156,7 +158,7 @@ def collect_and_store():
 
         return False
 
-    option_chain, spot = fetch_option_chain()
+    option_chain, spot, expiry = fetch_option_chain()
 
     if option_chain is None:
         return False
@@ -179,6 +181,8 @@ def collect_and_store():
             # =================================
 
             "timestamp": timestamp,
+
+            "expiry": expiry,
 
             "strike": strike,
 
@@ -228,6 +232,6 @@ def collect_and_store():
 
         save_snapshot(snapshot)
 
-    print(f"Saved snapshot at {timestamp}")
+    print(f"Saved snapshot at {timestamp} for expiry {expiry}")
 
     return True

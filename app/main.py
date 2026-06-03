@@ -6,7 +6,7 @@ from fastapi import Request
 import threading
 import time
 
-from app.database import create_tables
+from app.database import create_tables, migrate_existing_data
 from app.collector import collect_and_store
 
 # =========================================
@@ -54,6 +54,12 @@ templates = Jinja2Templates(
 # =========================================
 
 create_tables()
+
+# =========================================
+# MIGRATE EXISTING DATA
+# =========================================
+
+migrate_existing_data()
 
 # =========================================
 # BACKGROUND COLLECTOR LOOP

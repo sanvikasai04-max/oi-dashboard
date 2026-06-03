@@ -13,7 +13,8 @@ from app.calculations import (
 )
 from app.config import (
     get_data_date,
-    STRIKE_STEP
+    STRIKE_STEP,
+    TRACK_EXPIRY
 )
 
 router = APIRouter()
@@ -31,10 +32,12 @@ def get_atm_data(interval: str = "5m"):
     try:
 
         # =================================
-        # FETCH ALL DATA
+        # FETCH ALL DATA (Filter by expiry)
         # =================================
 
-        rows = db.query(OISnapshot).all()
+        rows = db.query(OISnapshot).filter(
+            OISnapshot.expiry == TRACK_EXPIRY
+        ).all()
 
         if not rows:
 
@@ -58,6 +61,9 @@ def get_atm_data(interval: str = "5m"):
 
                 "spot": row.spot,
 
+                "call_ltp": row.call_price,
+                "put_ltp": row.put_price,
+
                 "call_oi": row.call_oi,
                 "put_oi": row.put_oi,
 
@@ -79,6 +85,22 @@ def get_atm_data(interval: str = "5m"):
             })
 
         df = pd.DataFrame(data)
+
+        # =================================
+        # DEBUG: Check what's in the database
+        # =================================
+        
+        if len(df) > 0:
+            print(f"\n=== ATM Route Debug ===")
+            print(f"Total records: {len(df)}")
+            print(f"Date range: {df['timestamp'].min()} to {df['timestamp'].max()}")
+            print(f"Unique strikes: {sorted(df['strike'].unique())}")
+            print(f"Sample OI values for ATM at latest time:")
+            latest_time = df['timestamp'].max()
+            latest_data = df[df['timestamp'] == latest_time]
+            for _, row in latest_data.head(5).iterrows():
+                print(f"  Strike: {row['strike']}, Call_OI: {row['call_oi']}, Put_OI: {row['put_oi']}")
+            print("===\n")
 
         # =================================
         # SORT BY TIMESTAMP

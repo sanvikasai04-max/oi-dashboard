@@ -131,6 +131,8 @@ function fillTable(bodyId, rows, optionType){
 
             <td>${row.time}</td>
 
+            <td><strong>${row.ltp}</strong></td>
+
             <td class="${getBuildClass(row.buildup, optionType)}">
                 ${row.buildup}
             </td>

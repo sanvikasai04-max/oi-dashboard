@@ -11,7 +11,7 @@ from app.calculations import (
     get_atm_strike,
     generate_oi_table
 )
-from app.config import get_data_date
+from app.config import get_data_date, TRACK_EXPIRY
 
 router = APIRouter()
 
@@ -27,7 +27,9 @@ def get_dashboard_data(interval: str = "5m"):
 
     try:
 
-        rows = db.query(OISnapshot).all()
+        rows = db.query(OISnapshot).filter(
+            OISnapshot.expiry == TRACK_EXPIRY
+        ).all()
 
         if not rows:
 
@@ -46,6 +48,9 @@ def get_dashboard_data(interval: str = "5m"):
                 "strike": row.strike,
 
                 "spot": row.spot,
+
+                "call_ltp": row.call_price,
+                "put_ltp": row.put_price,
 
                 "call_oi": row.call_oi,
                 "put_oi": row.put_oi,
@@ -157,7 +162,9 @@ def get_itm_data(interval: str = "5m"):
 
     try:
 
-        rows = db.query(OISnapshot).all()
+        rows = db.query(OISnapshot).filter(
+            OISnapshot.expiry == TRACK_EXPIRY
+        ).all()
 
         if not rows:
 
@@ -176,6 +183,9 @@ def get_itm_data(interval: str = "5m"):
                 "strike": row.strike,
 
                 "spot": row.spot,
+
+                "call_ltp": row.call_price,
+                "put_ltp": row.put_price,
 
                 "call_oi": row.call_oi,
                 "put_oi": row.put_oi,

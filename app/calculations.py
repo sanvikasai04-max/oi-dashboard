@@ -167,6 +167,34 @@ def generate_oi_table(
     )
 
     # =====================================
+    # DROP BAD SNAPSHOTS AND PICK BEST ROW PER BUCKET
+    # =====================================
+
+    df["total_oi"] = (
+        df["call_oi"].fillna(0) +
+        df["put_oi"].fillna(0)
+    )
+    df["total_volume"] = (
+        df["call_volume"].fillna(0) +
+        df["put_volume"].fillna(0)
+    )
+
+    df = df[~(
+        (df["call_price"] == 0) &
+        (df["put_price"] == 0) &
+        (df["total_oi"] == 0)
+    )]
+
+    df = df.sort_values(
+        ["bucket", "total_oi", "total_volume", "timestamp"],
+        ascending=[True, False, False, False]
+    )
+    df = df.drop_duplicates(
+        subset=["bucket"],
+        keep="first"
+    )
+
+    # =====================================
     # KEEP LAST ROW PER BUCKET
     # =====================================
 
@@ -217,7 +245,7 @@ def generate_oi_table(
     # LOOP
     # =====================================
 
-    for i in range(1, len(grouped)):
+    for i in range(len(grouped)):
 
         current = grouped.iloc[i]
 
@@ -225,7 +253,10 @@ def generate_oi_table(
         # PREVIOUS COMPLETED TIMEFRAME BUCKET
         # =================================
 
-        past = grouped.iloc[i - 1]
+        if i == 0:
+            past = current
+        else:
+            past = grouped.iloc[i - 1]
 
         # =================================
         # OPTION TYPE
@@ -233,73 +264,68 @@ def generate_oi_table(
 
         if option_type == "CE":
 
-            prev_bucket = grouped.iloc[i - 1]
+            if i == 0:
+                price_change = 0
+                oi_change = 0
+                volume_change = 0
+                fresh_entry_ratio = 0
+            else:
+                prev_bucket = grouped.iloc[i - 1]
+                price_change = (
+                    current["call_price_last"]
+                    - prev_bucket["call_price_last"]
+                )
+                oi_change = (
+                    current["call_oi_last"]
+                    - prev_bucket["call_oi_last"]
+                )
+                volume_change = (
+                    current["call_volume_last"]
+                    - prev_bucket["call_volume_last"]
+                )
+                fresh_entry_ratio = (
+                    round((oi_change / volume_change) * 100, 2)
+                    if volume_change else 0
+                )
 
-            price_change = (
-                current["call_price_last"]
-                - prev_bucket["call_price_last"]
-            )
-
-            oi_change = (
-                current["call_oi_last"]
-                - prev_bucket["call_oi_last"]
-            )
-
-            volume_change = (
-                current["call_volume_last"]
-                - prev_bucket["call_volume_last"]
-            )
             delta = current["call_delta_last"]
-
-            fresh_entry_ratio = (
-                round((oi_change / volume_change) * 100, 2)
-                if volume_change else 0
-            )
-
             prev_delta = past["call_delta_last"]
-
             gamma = current["call_gamma_last"]
-
             prev_gamma = past["call_gamma_last"]
-
             iv = current["call_iv_last"]
-
             prev_iv = past["call_iv_last"]
 
         else:
 
-            prev_bucket = grouped.iloc[i - 1]
-
-            price_change = (
-                current["put_price_last"]
-                - prev_bucket["put_price_last"]
-            )
-
-            oi_change = (
-                current["put_oi_last"]
-                - prev_bucket["put_oi_last"]
-            )
-
-            volume_change = (
-                current["put_volume_last"]
-                - prev_bucket["put_volume_last"]
-            )
+            if i == 0:
+                price_change = 0
+                oi_change = 0
+                volume_change = 0
+                fresh_entry_ratio = 0
+            else:
+                prev_bucket = grouped.iloc[i - 1]
+                price_change = (
+                    current["put_price_last"]
+                    - prev_bucket["put_price_last"]
+                )
+                oi_change = (
+                    current["put_oi_last"]
+                    - prev_bucket["put_oi_last"]
+                )
+                volume_change = (
+                    current["put_volume_last"]
+                    - prev_bucket["put_volume_last"]
+                )
+                fresh_entry_ratio = (
+                    round((oi_change / volume_change) * 100, 2)
+                    if volume_change else 0
+                )
 
             delta = current["put_delta_last"]
-
-            fresh_entry_ratio = (
-                round((oi_change / volume_change) * 100, 2)
-                if volume_change else 0
-            )
-
             prev_delta = past["put_delta_last"]
-
             gamma = current["put_gamma_last"]
-
             prev_gamma = past["put_gamma_last"]
-
             iv = current["put_iv_last"]
-
             prev_iv = past["put_iv_last"]
 
         # =================================
@@ -343,6 +369,15 @@ def generate_oi_table(
         )
 
         # =================================
+        # GET LTP
+        # =================================
+
+        if option_type == "CE":
+            ltp = current["call_price_last"]
+        else:
+            ltp = current["put_price_last"]
+
+        # =================================
         # APPEND ROW
         # =================================
 
@@ -352,6 +387,8 @@ def generate_oi_table(
                 current["bucket"],
                 lookback
             ),
+
+            "ltp": round(ltp, 2),
 
             "buildup": buildup,
 
