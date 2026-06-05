@@ -33,7 +33,7 @@ today = dt.datetime.now().strftime("%Y_%m_%d")
 
 #DATABASE_URL = f"sqlite:///./oi_{today}.db"
 
-DATABASE_URL = "sqlite:///./oi_2026_06_02.db"
+DATABASE_URL = "sqlite:///./oi_2026_06_05.db"
 
 
 def get_data_date():

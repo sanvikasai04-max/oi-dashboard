@@ -28,6 +28,15 @@ async function fetchGreeksData(strike = null) {
             data.strike_options,
             data.strike
         );
+        document.getElementById(
+            "ce-title"
+        ).innerText =
+            `CE Delta + Gamma Spikes (Strike ${data.strike})`;
+
+        document.getElementById(
+            "pe-title"
+        ).innerText =
+            `PE Delta + Gamma Spikes (Strike ${data.strike})`;
 
         fillSpikeTable(
             "ce-spikes-body",
