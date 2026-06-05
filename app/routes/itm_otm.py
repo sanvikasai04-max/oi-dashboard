@@ -9,7 +9,8 @@ from app.database import (
 
 from app.calculations import (
     get_atm_strike,
-    generate_oi_table
+    generate_oi_table,
+    generate_greek_spikes
 )
 from app.config import get_data_date, TRACK_EXPIRY
 
@@ -88,7 +89,6 @@ def get_dashboard_data(interval: str = "5m"):
         atm = get_atm_strike(spot)
 
         otm = atm + 50
-
         # =================================
         # ATM
         # =================================
@@ -107,7 +107,20 @@ def get_dashboard_data(interval: str = "5m"):
             interval_name=interval
         )
 
-        # =================================
+        ce_spikes = generate_greek_spikes(
+            history_df=df,
+            strike=atm,
+            option_type="CE",
+            interval_name=interval
+        )
+
+        pe_spikes = generate_greek_spikes(
+            history_df=df,
+            strike=atm,
+            option_type="PE",
+            interval_name=interval
+        )
+                # =================================
         # OTM
         # =================================
 
@@ -140,6 +153,8 @@ def get_dashboard_data(interval: str = "5m"):
 
             "atm_ce_data": atm_ce_data,
             "atm_pe_data": atm_pe_data,
+            "ce_spikes": ce_spikes,
+            "pe_spikes": pe_spikes,
 
             "otm_ce_data": otm_ce_data,
             "otm_pe_data": otm_pe_data

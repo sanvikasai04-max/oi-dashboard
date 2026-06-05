@@ -9,7 +9,8 @@ from app.database import (
 
 from app.calculations import (
     get_atm_strike,
-    generate_oi_table
+    generate_oi_table,
+    generate_greek_spikes
 )
 from app.config import (
     get_data_date,
@@ -240,20 +241,19 @@ def get_greeks_data(
 
         strike_options = [
             opening_atm + i
-            for i in range(-300, 301, STRIKE_STEP)
+            for i in range(-500, 501, STRIKE_STEP)
         ]
 
         if strike is None or strike not in strike_options:
             strike = opening_atm
-
-        ce_data = generate_oi_table(
+        ce_spikes = generate_greek_spikes(
             history_df=df,
             strike=strike,
             option_type="CE",
             interval_name=interval
         )
 
-        pe_data = generate_oi_table(
+        pe_spikes = generate_greek_spikes(
             history_df=df,
             strike=strike,
             option_type="PE",
@@ -272,8 +272,8 @@ def get_greeks_data(
             "last_update": latest_timestamp,
             "earliest_update": earliest_timestamp,
             "data_date": get_data_date(),
-            "ce_data": ce_data,
-            "pe_data": pe_data
+            "ce_spikes": ce_spikes,
+            "pe_spikes": pe_spikes
         }
 
     finally:

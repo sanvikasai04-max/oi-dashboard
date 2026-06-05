@@ -10,101 +10,76 @@
     <span class="badge-blue ms-2">Opening ATM: <strong id="opening-atm">--</strong></span>
 </div>
 
-<div class="grid-container">
+<div class="mb-3">
 
-    <div class="dashboard-card p-3">
-        <h5 id="ce-atm-title">ATM CE</h5>
-        <canvas id="ce-atm-chart"></canvas>
-    </div>
+    <label>Select Strike</label>
 
-    <div class="dashboard-card p-3">
-        <h5 id="pe-atm-title">ATM PE</h5>
-        <canvas id="pe-atm-chart"></canvas>
-    </div>
-
-    <div class="dashboard-card p-3">
-        <h5 id="ce-plus50-title">ATM +50 CE</h5>
-        <canvas id="ce-plus50-chart"></canvas>
-    </div>
-
-    <div class="dashboard-card p-3">
-        <h5 id="pe-plus50-title">ATM +50 PE</h5>
-        <canvas id="pe-plus50-chart"></canvas>
-    </div>
-
-    <div class="dashboard-card p-3">
-        <h5 id="ce-plus100-title">ATM +100 CE</h5>
-        <canvas id="ce-plus100-chart"></canvas>
-    </div>
-
-    <div class="dashboard-card p-3">
-        <h5 id="pe-plus100-title">ATM +100 PE</h5>
-        <canvas id="pe-plus100-chart"></canvas>
-    </div>
-
-    <div class="dashboard-card p-3">
-        <h5 id="ce-plus150-title">ATM +150 CE</h5>
-        <canvas id="ce-plus150-chart"></canvas>
-    </div>
-
-    <div class="dashboard-card p-3">
-        <h5 id="pe-plus150-title">ATM +150 PE</h5>
-        <canvas id="pe-plus150-chart"></canvas>
-    </div>
-
-    <div class="dashboard-card p-3">
-        <h5 id="ce-plus200-title">ATM +200 CE</h5>
-        <canvas id="ce-plus200-chart"></canvas>
-    </div>
-
-    <div class="dashboard-card p-3">
-        <h5 id="pe-plus200-title">ATM +200 PE</h5>
-        <canvas id="pe-plus200-chart"></canvas>
-    </div>
-
-    <div class="dashboard-card p-3">
-        <h5 id="ce-minus50-title">ATM -50 CE</h5>
-        <canvas id="ce-minus50-chart"></canvas>
-    </div>
-
-    <div class="dashboard-card p-3">
-        <h5 id="pe-minus50-title">ATM -50 PE</h5>
-        <canvas id="pe-minus50-chart"></canvas>
-    </div>
-
-    <div class="dashboard-card p-3">
-        <h5 id="ce-minus100-title">ATM -100 CE</h5>
-        <canvas id="ce-minus100-chart"></canvas>
-    </div>
-
-    <div class="dashboard-card p-3">
-        <h5 id="pe-minus100-title">ATM -100 PE</h5>
-        <canvas id="pe-minus100-chart"></canvas>
-    </div>
-
-    <div class="dashboard-card p-3">
-        <h5 id="ce-minus150-title">ATM -150 CE</h5>
-        <canvas id="ce-minus150-chart"></canvas>
-    </div>
-
-    <div class="dashboard-card p-3">
-        <h5 id="pe-minus150-title">ATM -150 PE</h5>
-        <canvas id="pe-minus150-chart"></canvas>
-    </div>
-
-    <div class="dashboard-card p-3">
-        <h5 id="ce-minus200-title">ATM -200 CE</h5>
-        <canvas id="ce-minus200-chart"></canvas>
-    </div>
-
-    <div class="dashboard-card p-3">
-        <h5 id="pe-minus200-title">ATM -200 PE</h5>
-        <canvas id="pe-minus200-chart"></canvas>
-    </div>
+    <select
+        id="strike-select"
+        class="form-select"
+        style="max-width:250px;">
+    </select>
 
 </div>
 
+<div class="table-card">
+
+    <h4 class="p-2"
+        style="background:#facc15;color:black;">
+        CE Delta + Gamma Spikes
+    </h4>
+
+    <table class="table table-dark">
+
+        <thead>
+
+            <tr>
+                <th>Time</th>
+                <th>LTP</th>
+                <th>Delta</th>
+                <th>Delta %</th>
+                <th>Gamma</th>
+                <th>Gamma %</th>
+            </tr>
+
+        </thead>
+
+        <tbody id="ce-spikes-body"></tbody>
+
+    </table>
+
+</div>
+
+<br>
+
+<div class="table-card">
+
+    <h4 class="p-2"
+        style="background:#facc15;color:black;">
+        PE Delta + Gamma Spikes
+    </h4>
+
+    <table class="table table-dark">
+
+        <thead>
+
+            <tr>
+                <th>Time</th>
+                <th>LTP</th>
+                <th>Delta</th>
+                <th>Delta %</th>
+                <th>Gamma</th>
+                <th>Gamma %</th>
+            </tr>
+
+        </thead>
+
+        <tbody id="pe-spikes-body"></tbody>
+
+    </table>
+
+</div>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="/static/js/greeks.js?v=20260603"></script>
+<script src="/static/js/greeks.js?v=20260606_1"></script>
 
 {% endblock %}

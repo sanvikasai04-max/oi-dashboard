@@ -1,197 +1,152 @@
-const STRIKE_PRESETS = [
-    { offset: 0, label: "ATM", id: "atm" },
-    { offset: 50, label: "ATM +50", id: "plus50" },
-    { offset: 100, label: "ATM +100", id: "plus100" },
-    { offset: 150, label: "ATM +150", id: "plus150" },
-    { offset: 200, label: "ATM +200", id: "plus200" },
-    { offset: -50, label: "ATM -50", id: "minus50" },
-    { offset: -100, label: "ATM -100", id: "minus100" },
-    { offset: -150, label: "ATM -150", id: "minus150" },
-    { offset: -200, label: "ATM -200", id: "minus200" }
-];
+console.log("NEW GREEKS JS LOADED");
+async function fetchGreeksData(strike = null) {
 
-async function fetchGreeksData() {
     try {
-        const baseResponse = await fetch(`/api/greeks?interval=5m`);
-        const baseData = await baseResponse.json();
 
-        if (baseData.error) {
-            console.error("GREKS PAGE ERROR:", baseData.error);
+        let url = "/api/greeks?interval=5m";
+
+        if (strike) {
+            url += `&strike=${strike}`;
+        }
+
+        const response = await fetch(url);
+
+        const data = await response.json();
+
+        if (data.error) {
+            console.error(data.error);
             return;
         }
 
-        const openingAtm = baseData.opening_atm;
-        document.getElementById("spot-price").innerText = Number(baseData.spot).toFixed(2);
-        document.getElementById("opening-atm").innerText = openingAtm;
+        document.getElementById("spot-price").innerText =
+            Number(data.spot).toFixed(2);
 
-        const chartRequests = STRIKE_PRESETS.map(preset => {
-            const strike = openingAtm + preset.offset;
-            return fetch(`/api/greeks?interval=5m&strike=${strike}`)
-                .then(res => res.json())
-                .then(data => ({ preset, strike, data }));
-        });
+        document.getElementById("opening-atm").innerText =
+            data.opening_atm;
 
-        const strikeResults = await Promise.all(chartRequests);
+        populateStrikeDropdown(
+            data.strike_options,
+            data.strike
+        );
 
-        strikeResults.forEach(result => {
-            if (result.data.error) {
-                console.error(`GREKS PAGE ERROR for strike ${result.strike}:`, result.data.error);
-                return;
-            }
+        fillSpikeTable(
+            "ce-spikes-body",
+            data.ce_spikes
+        );
 
-            const ce = result.data.ce_data.slice().reverse();
-            const pe = result.data.pe_data.slice().reverse();
-            const labels = ce.map(row => row.time);
+        fillSpikeTable(
+            "pe-spikes-body",
+            data.pe_spikes
+        );
 
-            const ceTitle = document.getElementById(`ce-${result.preset.id}-title`);
-            if (ceTitle) {
-                ceTitle.innerText = `CE ${result.preset.label} (${result.strike})`;
-            }
-            const peTitle = document.getElementById(`pe-${result.preset.id}-title`);
-            if (peTitle) {
-                peTitle.innerText = `PE ${result.preset.label} (${result.strike})`;
-            }
-
-            renderLineChart(`ce-${result.preset.id}-chart`, labels, [
-                {
-                    label: "CE Delta",
-                    data: ce.map(row => row.delta),
-                    borderColor: "#22c55e",
-                    backgroundColor: "rgba(34, 197, 94, 0.2)",
-                    fill: false,
-                    tension: 0.3,
-                    pointRadius: 2,
-                    borderWidth: 2,
-                    yAxisID: "delta"
-                },
-                {
-                    label: "CE Gamma",
-                    data: ce.map(row => row.gamma),
-                    borderColor: "#60a5fa",
-                    backgroundColor: "rgba(96, 165, 250, 0.2)",
-                    fill: false,
-                    tension: 0.3,
-                    pointRadius: 2,
-                    borderWidth: 3,
-                    yAxisID: "gamma"
-                }
-            ], `CE ${result.preset.label} (${result.strike})`);
-
-            renderLineChart(`pe-${result.preset.id}-chart`, labels, [
-                {
-                    label: "PE Delta",
-                    data: pe.map(row => row.delta),
-                    borderColor: "#ef4444",
-                    backgroundColor: "rgba(239, 68, 68, 0.2)",
-                    fill: false,
-                    tension: 0.3,
-                    pointRadius: 2,
-                    borderWidth: 2,
-                    yAxisID: "delta"
-                },
-                {
-                    label: "PE Gamma",
-                    data: pe.map(row => row.gamma),
-                    borderColor: "#fbbf24",
-                    backgroundColor: "rgba(251, 191, 36, 0.2)",
-                    fill: false,
-                    tension: 0.3,
-                    pointRadius: 2,
-                    borderWidth: 3,
-                    yAxisID: "gamma"
-                }
-            ], `PE ${result.preset.label} (${result.strike})`);
-        });
     }
     catch (error) {
-        console.error("GREKS PAGE ERROR:", error);
+
+        console.error(
+            "Greeks Page Error:",
+            error
+        );
+
     }
+
 }
 
-function renderLineChart(canvasId, labels, datasets, title) {
-    const canvas = document.getElementById(canvasId);
-    if (!canvas) {
-        return;
-    }
+function populateStrikeDropdown(
+    strikes,
+    selectedStrike
+) {
 
-    const existingChart = Chart.getChart(canvas);
-    if (existingChart) {
-        existingChart.destroy();
-    }
+    const dropdown =
+        document.getElementById(
+            "strike-select"
+        );
 
-    new Chart(canvas, {
-        type: "line",
-        data: {
-            labels,
-            datasets
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                title: {
-                    display: false,
-                    text: title
-                },
-                tooltip: {
-                    mode: "index",
-                    intersect: false
-                },
-                legend: {
-                    position: "bottom"
-                }
-            },
-            interaction: {
-                mode: "nearest",
-                axis: "x",
-                intersect: false
-            },
-            scales: {
-                x: {
-                    ticks: {
-                        color: "#fff"
-                    },
-                    grid: {
-                        color: "rgba(255,255,255,0.08)"
-                    }
-                },
-                delta: {
-                    type: "linear",
-                    position: "left",
-                    title: {
-                        display: true,
-                        text: "Delta",
-                        color: "#fff"
-                    },
-                    ticks: {
-                        color: "#fff"
-                    },
-                    grid: {
-                        color: "rgba(255,255,255,0.08)"
-                    }
-                },
-                gamma: {
-                    type: "linear",
-                    position: "right",
-                    title: {
-                        display: true,
-                        text: "Gamma",
-                        color: "#fff"
-                    },
-                    ticks: {
-                        color: "#fff"
-                    },
-                    grid: {
-                        drawOnChartArea: false,
-                        color: "rgba(255,255,255,0.08)"
-                    }
-                }
-            }
+    dropdown.innerHTML = "";
+
+    strikes.forEach(strike => {
+
+        const option =
+            document.createElement(
+                "option"
+            );
+        console.log("Dropdown found:", dropdown);
+        console.log("Strikes:", strikes);
+        option.value = strike;
+        option.textContent = strike;
+
+        if (
+            Number(strike) === Number(selectedStrike)
+        ) {
+            option.selected = true;
         }
+
+        dropdown.appendChild(option);
+
     });
+
+    dropdown.onchange = function() {
+
+        fetchGreeksData(
+            this.value
+        );
+
+    };
+
 }
 
-window.addEventListener("DOMContentLoaded", () => {
-    fetchGreeksData();
-    setInterval(fetchGreeksData, 5 * 60 * 1000);
-});
+function fillSpikeTable(
+    tbodyId,
+    rows
+) {
 
+    const tbody =
+        document.getElementById(
+            tbodyId
+        );
+
+    tbody.innerHTML = "";
+
+    if (!rows || rows.length === 0) {
+
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6">
+                    No spikes found
+                </td>
+            </tr>
+        `;
+
+        return;
+
+    }
+
+    rows.forEach(row => {
+
+        const tr =
+            document.createElement(
+                "tr"
+            );
+
+        tr.innerHTML = `
+            <td>${row.time}</td>
+            <td>${row.ltp}</td>
+            <td>${row.delta}</td>
+            <td>${row.delta_change}%</td>
+            <td>${row.gamma}</td>
+            <td>${row.gamma_change}%</td>
+        `;
+
+        tbody.appendChild(
+            tr
+        );
+
+    });
+
+}
+
+window.addEventListener(
+    "DOMContentLoaded",
+    () => {
+        fetchGreeksData();
+    }
+);

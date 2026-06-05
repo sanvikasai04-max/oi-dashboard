@@ -6,7 +6,7 @@ import re
 # =========================================
 
 CLIENT_ID = "1107485546"
-ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzgwNTQ0NDEyLCJpYXQiOjE3ODA0NTgwMTIsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTA3NDg1NTQ2In0.cqNTMh01SuYam4S3zyIL_3tAsd01S15OYMeRMKNiC_8NoRZR0_1plQ1Mlfu7sqpJdK9zEtUqXBbk3qhW-YFBfA"
+ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzgwNzE2OTA1LCJpYXQiOjE3ODA2MzA1MDUsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTA3NDg1NTQ2In0.rNCNXFtLvADrqKMwnYd-KJls0M86-Mb72TvLSd7giTtvZxlPeSiWyTSn2l_Ncy8TrPHVXsc0t4rjaPi1HFE39A"
 # =========================================
 # APP SETTINGS
 # =========================================
@@ -33,7 +33,7 @@ today = dt.datetime.now().strftime("%Y_%m_%d")
 
 #DATABASE_URL = f"sqlite:///./oi_{today}.db"
 
-DATABASE_URL = "sqlite:///./oi_2026_06_03.db"
+DATABASE_URL = "sqlite:///./oi_2026_06_02.db"
 
 
 def get_data_date():

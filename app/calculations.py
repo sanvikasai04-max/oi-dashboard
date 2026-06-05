@@ -332,31 +332,28 @@ def generate_oi_table(
         # RATE OF CHANGE
         # =================================
 
-        display_delta = round(delta, 2)
+        # =================================
+        # RATE OF CHANGE
+        # =================================
 
-        display_prev_delta = round(prev_delta, 2)
-
-        display_gamma = round(gamma, 4)
-
-        display_prev_gamma = round(prev_gamma, 4)
-
-        display_iv = round(iv, 2)
-
-        display_prev_iv = round(prev_iv, 2)
+        # Raw values from DB
+        display_delta = delta
+        display_gamma = gamma
+        display_iv = round(iv, 3)
 
         delta_change = calculate_percent_change(
-            display_delta,
-            display_prev_delta
+            abs(delta),
+            abs(prev_delta)
         )
 
         gamma_change = calculate_percent_change(
-            display_gamma,
-            display_prev_gamma
+            gamma,
+            prev_gamma
         )
 
         iv_change = calculate_percent_change(
-            display_iv,
-            display_prev_iv
+            iv,
+            prev_iv
         )
 
         # =================================
@@ -411,3 +408,105 @@ def generate_oi_table(
     rows.reverse()
 
     return rows
+
+
+def generate_greek_spikes(
+    history_df,
+    strike,
+    option_type,
+    interval_name
+):
+
+    df = history_df[
+        history_df["strike"] == strike
+    ].copy()
+
+    if df.empty:
+        return []
+
+    lookback = INTERVAL_MAP[interval_name]
+    bucket_minutes = lookback * 5
+
+    df["timestamp"] = pd.to_datetime(
+        df["timestamp"]
+    )
+
+    df["bucket"] = (
+        df["timestamp"]
+        .dt.floor(f"{bucket_minutes}min")
+    )
+
+    idx = (
+        df.groupby("bucket")["timestamp"]
+        .idxmax()
+    )
+
+    df = (
+        df.loc[idx]
+        .sort_values("bucket")
+        .reset_index(drop=True)
+    )
+
+    spikes = []
+
+    for i in range(1, len(df)):
+
+        curr = df.iloc[i]
+        prev = df.iloc[i - 1]
+
+        if option_type == "CE":
+
+            delta = curr["call_delta"]
+            prev_delta = prev["call_delta"]
+
+            gamma = curr["call_gamma"]
+            prev_gamma = prev["call_gamma"]
+
+            ltp = curr["call_price"]
+
+        else:
+
+            delta = curr["put_delta"]
+            prev_delta = prev["put_delta"]
+
+            gamma = curr["put_gamma"]
+            prev_gamma = prev["put_gamma"]
+
+            ltp = curr["put_price"]
+
+        delta_change = calculate_percent_change(
+            abs(delta),
+            abs(prev_delta)
+        )
+
+        gamma_change = calculate_percent_change(
+            gamma,
+            prev_gamma
+        )
+
+        if (
+            delta_change >= 10
+            and gamma_change >= 10
+        ):
+
+            spikes.append({
+
+                "time": curr["bucket"].strftime(
+                    "%H:%M"
+                ),
+
+                "ltp": round(ltp, 2),
+
+                "delta": round(delta, 5),
+
+                "delta_change": delta_change,
+
+                "gamma": round(gamma, 6),
+
+                "gamma_change": gamma_change
+
+            })
+
+    spikes.reverse()
+
+    return spikes

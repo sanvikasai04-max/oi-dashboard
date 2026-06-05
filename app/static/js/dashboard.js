@@ -97,6 +97,15 @@ async function fetchDashboardData() {
             data.otm_pe_data,
             "PE"
         );
+        fillSpikeTable(
+            "ce-spikes-body",
+            data.ce_spikes
+        );
+
+        fillSpikeTable(
+            "pe-spikes-body",
+            data.pe_spikes
+        );
 
     }
 
@@ -313,3 +322,32 @@ setInterval(
     fetchDashboardData,
     5000
 );
+
+function fillSpikeTable(bodyId, rows) {
+
+    const tbody =
+        document.getElementById(bodyId);
+
+    tbody.innerHTML = "";
+
+    rows.forEach(row => {
+
+        const tr =
+            document.createElement("tr");
+
+        tr.classList.add("spike-row");
+
+        tr.innerHTML = `
+            <td>${row.time}</td>
+            <td>${Number(row.ltp).toFixed(2)}</td>
+            <td>${Number(row.delta).toFixed(5)}</td>
+            <td>${Number(row.gamma).toFixed(6)}</td>
+            <td>${row.delta_change}%</td>
+            <td>${row.gamma_change}%</td>
+        `;
+
+        tbody.appendChild(tr);
+
+    });
+
+}

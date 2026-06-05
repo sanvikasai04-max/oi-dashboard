@@ -497,3 +497,22 @@ table {
     box-shadow: inset 0 0 0 9999px rgba(239, 68, 68, 0.08) !important;
 
 }
+
+.spike-row {
+
+    background-color: rgba(
+        250,
+        204,
+        21,
+        0.20
+    ) !important;
+
+}
+
+.spike-row td {
+
+    color: #facc15 !important;
+
+    font-weight: bold;
+
+}
