@@ -1,141 +1,92 @@
-console.log("NEW GREEKS JS LOADED");
+console.log("GREEKS JS v20260606_2 LOADED");
+
+// =========================================
+// SHARED STATE
+// =========================================
+
+let allEntrySignals = [];
+
+// =========================================
+// MAIN FETCH
+// =========================================
+
 async function fetchGreeksData(strike = null) {
 
     try {
 
         let url = "/api/greeks?interval=5m";
-
-        if (strike) {
-            url += `&strike=${strike}`;
-        }
+        if (strike) url += `&strike=${strike}`;
 
         const response = await fetch(url);
-
-        const data = await response.json();
+        const data     = await response.json();
 
         if (data.error) {
             console.error(data.error);
             return;
         }
 
-        document.getElementById("spot-price").innerText =
-            Number(data.spot).toFixed(2);
+        // ---- existing fields ----
+        document.getElementById("spot-price").innerText  = Number(data.spot).toFixed(2);
+        document.getElementById("opening-atm").innerText = data.opening_atm;
 
-        document.getElementById("opening-atm").innerText =
-            data.opening_atm;
+        populateStrikeDropdown(data.strike_options, data.strike);
 
-        populateStrikeDropdown(
-            data.strike_options,
-            data.strike
-        );
-        document.getElementById(
-            "ce-title"
-        ).innerText =
+        document.getElementById("ce-title").innerText =
             `CE Delta + Gamma Spikes (Strike ${data.strike})`;
-
-        document.getElementById(
-            "pe-title"
-        ).innerText =
+        document.getElementById("pe-title").innerText =
             `PE Delta + Gamma Spikes (Strike ${data.strike})`;
 
-        fillSpikeTable(
-            "ce-spikes-body",
-            data.ce_spikes
-        );
+        fillSpikeTable("ce-spikes-body", data.ce_spikes);
+        fillSpikeTable("pe-spikes-body", data.pe_spikes);
 
-        fillSpikeTable(
-            "pe-spikes-body",
-            data.pe_spikes
-        );
+        // ---- NEW: entry signals ----
+        allEntrySignals = data.entry_signals || [];
+        fillScorecard(data.entry_summary || {});
+        applyEntryFilters();
 
+    } catch (error) {
+        console.error("Greeks Page Error:", error);
     }
-    catch (error) {
-
-        console.error(
-            "Greeks Page Error:",
-            error
-        );
-
-    }
-
 }
 
-function populateStrikeDropdown(
-    strikes,
-    selectedStrike
-) {
+// =========================================
+// STRIKE DROPDOWN  (unchanged)
+// =========================================
 
-    const dropdown =
-        document.getElementById(
-            "strike-select"
-        );
+function populateStrikeDropdown(strikes, selectedStrike) {
 
+    const dropdown = document.getElementById("strike-select");
     dropdown.innerHTML = "";
 
     strikes.forEach(strike => {
-
-        const option =
-            document.createElement(
-                "option"
-            );
-        console.log("Dropdown found:", dropdown);
-        console.log("Strikes:", strikes);
-        option.value = strike;
+        const option       = document.createElement("option");
+        option.value       = strike;
         option.textContent = strike;
-
-        if (
-            Number(strike) === Number(selectedStrike)
-        ) {
-            option.selected = true;
-        }
-
+        if (Number(strike) === Number(selectedStrike)) option.selected = true;
         dropdown.appendChild(option);
-
     });
 
-    dropdown.onchange = function() {
-
-        fetchGreeksData(
-            this.value
-        );
-
+    dropdown.onchange = function () {
+        fetchGreeksData(this.value);
     };
-
 }
 
-function fillSpikeTable(
-    tbodyId,
-    rows
-) {
+// =========================================
+// SPIKE TABLE  (unchanged)
+// =========================================
 
-    const tbody =
-        document.getElementById(
-            tbodyId
-        );
+function fillSpikeTable(tbodyId, rows) {
 
+    const tbody = document.getElementById(tbodyId);
     tbody.innerHTML = "";
 
     if (!rows || rows.length === 0) {
-
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="6">
-                    No spikes found
-                </td>
-            </tr>
-        `;
-
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#6b7280;padding:20px;">No spikes found</td></tr>`;
         return;
-
     }
 
     rows.forEach(row => {
-
-        const tr =
-            document.createElement(
-                "tr"
-            );
-
+        const tr = document.createElement("tr");
         tr.innerHTML = `
             <td>${row.time}</td>
             <td>${row.ltp}</td>
@@ -144,18 +95,150 @@ function fillSpikeTable(
             <td>${row.gamma}</td>
             <td>${row.gamma_change}%</td>
         `;
-
-        tbody.appendChild(
-            tr
-        );
-
+        tbody.appendChild(tr);
     });
-
 }
 
-window.addEventListener(
-    "DOMContentLoaded",
-    () => {
-        fetchGreeksData();
+// =========================================
+// SCORECARD
+// =========================================
+
+function fillScorecard(s) {
+
+    document.getElementById("esc-total").innerText = s.total  ?? "--";
+    document.getElementById("esc-hits").innerText  = s.target_hits ?? "--";
+    document.getElementById("esc-sl").innerText    = s.sl_hits ?? "--";
+    document.getElementById("esc-delta").innerText = s.delta_exits ?? "--";
+    document.getElementById("esc-open").innerText  = s.open ?? "--";
+
+    const pnl   = s.net_pnl_pct ?? null;
+    const pnlEl = document.getElementById("esc-pnl");
+
+    if (pnl !== null) {
+        pnlEl.innerText   = (pnl >= 0 ? "+" : "") + pnl + "%";
+        pnlEl.style.color = pnl >= 0 ? "#22c55e" : "#ef4444";
+    } else {
+        pnlEl.innerText   = "--";
+        pnlEl.style.color = "#f9fafb";
     }
-);
+}
+
+// =========================================
+// ENTRY FILTERS
+// =========================================
+
+function applyEntryFilters() {
+
+    const sf = document.getElementById("filter-setup").value;
+    const of = document.getElementById("filter-outcome").value;
+
+    let rows = allEntrySignals;
+    if (sf !== "all") rows = rows.filter(r => r.setup    === sf);
+
+    // strip emoji prefix from outcome filter value
+    const ofClean = of.replace(/^[^\w]+/, "").trim();
+    if (of !== "all") rows = rows.filter(r => r.outcome  === ofClean ||
+                                              r.outcome  === of);
+
+    renderEntryTable(rows);
+}
+
+// =========================================
+// RENDER ENTRY TABLE
+// =========================================
+
+function renderEntryTable(rows) {
+
+    const tbody = document.getElementById("entry-signals-body");
+
+    if (!rows || rows.length === 0) {
+        tbody.innerHTML = `
+            <tr><td colspan="14" style="text-align:center;color:#6b7280;padding:30px;">
+                No signals match the selected filters.
+            </td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = "";
+
+    rows.forEach(row => {
+
+        const tr = document.createElement("tr");
+
+        if (row.outcome === "Target Hit") tr.classList.add("erow-target");
+        else if (row.outcome === "SL Hit") tr.classList.add("erow-sl");
+        else if (row.outcome === "Open")   tr.classList.add("erow-open");
+
+        const pnlLabel = row.outcome === "Open"
+            ? `<span class="pnl-n">⏳ open</span>`
+            : `<span class="${pnlClass(row.pnl_pct)}">${row.pnl_pct >= 0 ? "+" : ""}${row.pnl_pct}%</span>`;
+
+        tr.innerHTML = `
+            <td style="font-size:11px">${row.time}</td>
+            <td><span class="setup-badge ${setupClass(row.setup)}">${row.setup}</span></td>
+            <td><strong>${row.entry_ltp}</strong></td>
+            <td style="color:#ef4444">${row.sl}</td>
+            <td style="color:#22c55e">${row.target}</td>
+            <td>${row.delta}</td>
+            <td class="${pctCls(row.delta_chg)}">${row.delta_chg > 0 ? "+" : ""}${row.delta_chg}%</td>
+            <td>${row.gamma}</td>
+            <td class="${pctCls(row.gamma_chg)}">${row.gamma_chg > 0 ? "+" : ""}${row.gamma_chg}%</td>
+            <td style="font-size:11px">${row.buildup}</td>
+            <td>${outcomeBadge(row.outcome)}</td>
+            <td>${row.exit_ltp !== null ? row.exit_ltp : "--"}</td>
+            <td style="color:#9ca3af; font-size:11px">${row.exit_time || "--"}</td>
+            <td>${pnlLabel}</td>
+        `;
+
+        tbody.appendChild(tr);
+    });
+}
+
+// =========================================
+// SMALL HELPERS
+// =========================================
+
+function setupClass(setup) {
+    if (setup === "CE Long")        return "sb-ce-long";
+    if (setup === "PE Long")        return "sb-pe-long";
+    if (setup === "CE Short Cover") return "sb-ce-cover";
+    if (setup === "PE Short Cover") return "sb-pe-cover";
+    return "";
+}
+
+function outcomeBadge(outcome) {
+    if (outcome === "Target Hit") return `<span class="ob-target">🎯 Target</span>`;
+    if (outcome === "SL Hit")     return `<span class="ob-sl">🛑 SL</span>`;
+    if (outcome === "Delta Exit") return `<span class="ob-delta">↩ Delta</span>`;
+    if (outcome === "Open")       return `<span class="ob-open">⏳ Open</span>`;
+    return outcome;
+}
+
+function pctCls(val) {
+    const n = Number(val);
+    if (n > 0) return "pct-green";
+    if (n < 0) return "pct-red";
+    return "pct-neutral";
+}
+
+function pnlClass(val) {
+    const n = Number(val);
+    if (n > 0) return "pnl-g";
+    if (n < 0) return "pnl-r";
+    return "pnl-n";
+}
+
+// =========================================
+// FILTER EVENT LISTENERS
+// =========================================
+
+document.getElementById("filter-setup").addEventListener("change", applyEntryFilters);
+document.getElementById("filter-outcome").addEventListener("change", applyEntryFilters);
+
+// =========================================
+// INIT
+// =========================================
+
+window.addEventListener("DOMContentLoaded", () => {
+    fetchGreeksData();
+});

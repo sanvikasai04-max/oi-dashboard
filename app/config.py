@@ -33,17 +33,35 @@ today = dt.datetime.now().strftime("%Y_%m_%d")
 
 #DATABASE_URL = f"sqlite:///./oi_{today}.db"
 
-DATABASE_URL = "sqlite:///./oi_2026_06_05.db"
+DATABASE_URL = "sqlite:///./oi_2026_06_02.db"
 
 
-def get_data_date():
+def get_database_date():
     match = re.search(r"(\d{4})[_-](\d{2})[_-](\d{2})\.db", DATABASE_URL)
 
     if not match:
         return None
 
     year, month, day = match.groups()
-    return dt.date(int(year), int(month), int(day)).strftime("%d %b %Y")
+    return dt.date(int(year), int(month), int(day))
+
+
+def get_data_iso_date():
+    data_date = get_database_date()
+
+    if data_date is None:
+        return None
+
+    return data_date.isoformat()
+
+
+def get_data_date():
+    data_date = get_database_date()
+
+    if data_date is None:
+        return None
+
+    return data_date.strftime("%d %b %Y")
 
 # =========================================
 # MARKET SETTINGS

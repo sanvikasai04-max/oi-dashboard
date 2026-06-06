@@ -6,6 +6,24 @@ from app.config import (
     INTERVAL_MAP
 )
 
+MARKET_OPEN_TIME = dt.time(9, 15)
+MARKET_CLOSE_TIME = dt.time(15, 30)
+
+
+def filter_market_session(df):
+    if df.empty:
+        return df
+
+    df = df.copy()
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+
+    trade_time = df["timestamp"].dt.time
+
+    return df[
+        (trade_time >= MARKET_OPEN_TIME) &
+        (trade_time <= MARKET_CLOSE_TIME)
+    ].copy()
+
 # =========================================
 # FORMAT VOLUME
 # =========================================
@@ -154,6 +172,8 @@ def generate_oi_table(
     df["timestamp"] = pd.to_datetime(
         df["timestamp"]
     )
+
+    df = filter_market_session(df)
 
     df = df.sort_values("timestamp")
 
@@ -430,6 +450,8 @@ def generate_greek_spikes(
     df["timestamp"] = pd.to_datetime(
         df["timestamp"]
     )
+
+    df = filter_market_session(df)
 
     df["bucket"] = (
         df["timestamp"]

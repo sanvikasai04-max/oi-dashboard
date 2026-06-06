@@ -11,73 +11,218 @@
 </div>
 
 <div class="mb-3">
-
     <label>Select Strike</label>
-
-    <select
-        id="strike-select"
-        class="form-select"
-        style="max-width:250px;">
-    </select>
-
+    <select id="strike-select" class="form-select" style="max-width:250px;"></select>
 </div>
 
+<!-- =========================================
+     EXISTING SPIKE TABLES
+========================================= -->
+
 <div class="table-card">
-
-    <h4 id="ce-title" style="color:#facc15;">
-        CE Delta + Gamma Spikes
-    </h4>
-
+    <h4 id="ce-title" style="color:#facc15;">CE Delta + Gamma Spikes</h4>
     <table class="table table-dark">
-
         <thead>
-
             <tr>
-                <th>Time</th>
-                <th>LTP</th>
-                <th>Delta</th>
-                <th>Delta %</th>
-                <th>Gamma</th>
-                <th>Gamma %</th>
+                <th>Time</th><th>LTP</th><th>Delta</th>
+                <th>Delta %</th><th>Gamma</th><th>Gamma %</th>
             </tr>
-
         </thead>
-
         <tbody id="ce-spikes-body"></tbody>
-
     </table>
-
 </div>
 
 <br>
 
 <div class="table-card">
-
-    <h4 id="pe-title" style="color:#facc15;">
-        PE Delta + Gamma Spikes
-    </h4>
-
+    <h4 id="pe-title" style="color:#facc15;">PE Delta + Gamma Spikes</h4>
     <table class="table table-dark">
-
         <thead>
-
             <tr>
-                <th>Time</th>
-                <th>LTP</th>
-                <th>Delta</th>
-                <th>Delta %</th>
-                <th>Gamma</th>
-                <th>Gamma %</th>
+                <th>Time</th><th>LTP</th><th>Delta</th>
+                <th>Delta %</th><th>Gamma</th><th>Gamma %</th>
             </tr>
-
         </thead>
-
         <tbody id="pe-spikes-body"></tbody>
-
     </table>
+</div>
+
+<!-- =========================================
+     ENTRY SIGNALS SECTION
+========================================= -->
+
+<div style="margin-top: 32px;">
+
+    <!-- Section heading -->
+    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+
+        <div>
+            <h4 style="color:#f9fafb; margin:0;">⚡ Entry Signals</h4>
+            <div style="font-size:12px; color:#6b7280; margin-top:3px;">
+                Δ ≥15% &amp; Γ ≥15% (fresh) &nbsp;|&nbsp; Δ ≥20% &amp; Γ ≥20% (short cover) &nbsp;|&nbsp;
+                SL −30% &nbsp;|&nbsp; Target +50% &nbsp;|&nbsp; Delta exit &lt; 0.40
+            </div>
+        </div>
+
+        <!-- Filters -->
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <select id="filter-setup" class="form-select" style="width:auto; min-width:140px; font-size:13px;">
+                <option value="all">All Setups</option>
+                <option value="CE Long">CE Long</option>
+                <option value="PE Long">PE Long</option>
+                <option value="CE Short Cover">CE Short Cover</option>
+                <option value="PE Short Cover">PE Short Cover</option>
+            </select>
+            <select id="filter-outcome" class="form-select" style="width:auto; min-width:130px; font-size:13px;">
+                <option value="all">All Outcomes</option>
+                <option value="Target Hit">🎯 Target Hit</option>
+                <option value="SL Hit">🛑 SL Hit</option>
+                <option value="Delta Exit">↩ Delta Exit</option>
+                <option value="Open">⏳ Open</option>
+            </select>
+        </div>
+
+    </div>
+
+    <!-- Scorecard -->
+    <div id="entry-scorecard" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
+        <div class="ecard">
+            <div class="ecard-label">Total</div>
+            <div class="ecard-val" id="esc-total">--</div>
+        </div>
+        <div class="ecard ecard-win">
+            <div class="ecard-label">🎯 Target</div>
+            <div class="ecard-val" id="esc-hits">--</div>
+        </div>
+        <div class="ecard ecard-loss">
+            <div class="ecard-label">🛑 SL</div>
+            <div class="ecard-val" id="esc-sl">--</div>
+        </div>
+        <div class="ecard ecard-neut">
+            <div class="ecard-label">↩ Delta</div>
+            <div class="ecard-val" id="esc-delta">--</div>
+        </div>
+        <div class="ecard ecard-open">
+            <div class="ecard-label">⏳ Open</div>
+            <div class="ecard-val" id="esc-open">--</div>
+        </div>
+        <div class="ecard ecard-pnl">
+            <div class="ecard-label">Net P&amp;L %</div>
+            <div class="ecard-val" id="esc-pnl">--</div>
+        </div>
+    </div>
+
+    <!-- Table -->
+    <div class="table-card">
+        <div class="table-responsive">
+            <table class="table table-dark table-hover" style="min-width:900px;">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Setup</th>
+                        <th>Entry LTP</th>
+                        <th style="color:#ef4444">SL</th>
+                        <th style="color:#22c55e">Target</th>
+                        <th>Delta</th>
+                        <th>Δ%</th>
+                        <th>Gamma</th>
+                        <th>Γ%</th>
+                        <th>Buildup</th>
+                        <th>Outcome</th>
+                        <th>Exit LTP</th>
+                        <th>Exit Time</th>
+                        <th>P&amp;L %</th>
+                    </tr>
+                </thead>
+                <tbody id="entry-signals-body">
+                    <tr>
+                        <td colspan="14" style="text-align:center; color:#6b7280; padding:30px;">
+                            Loading signals...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Legend -->
+    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; margin-bottom:24px;">
+        <span class="entry-leg leg-ce-long">CE Long — Δ≥15% Γ≥15% + Long Build-up</span>
+        <span class="entry-leg leg-pe-long">PE Long — Δ≥15% Γ≥15% + Long Build-up</span>
+        <span class="entry-leg leg-ce-cover">CE Short Cover — Δ≥20% Γ≥20% + Short Covering</span>
+        <span class="entry-leg leg-pe-cover">PE Short Cover — Δ≥20% Γ≥20% + Short Covering</span>
+    </div>
 
 </div>
+
+<!-- =========================================
+     SCOPED STYLES FOR ENTRY SECTION
+========================================= -->
+<style>
+
+/* Scorecard */
+.ecard {
+    flex: 1;
+    min-width: 90px;
+    background: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 10px;
+    padding: 10px 14px;
+    text-align: center;
+}
+.ecard-win  { border-color: #065f46; }
+.ecard-loss { border-color: #7f1d1d; }
+.ecard-neut { border-color: #92400e; }
+.ecard-open { border-color: #3730a3; }
+.ecard-pnl  { border-color: #1d4ed8; }
+
+.ecard-label { font-size: 11px; color: #9ca3af; margin-bottom: 4px; }
+.ecard-val   { font-size: 22px; font-weight: bold; color: #f9fafb; }
+
+/* Setup badges */
+.setup-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 5px;
+    font-size: 11px;
+    font-weight: bold;
+    white-space: nowrap;
+}
+.sb-ce-long   { background: rgba(34,197,94,0.18);  color: #22c55e; }
+.sb-pe-long   { background: rgba(239,68,68,0.18);  color: #ef4444; }
+.sb-ce-cover  { background: rgba(20,184,166,0.18); color: #14b8a6; }
+.sb-pe-cover  { background: rgba(249,115,22,0.18); color: #f97316; }
+
+/* Outcome badges */
+.ob-target { background:rgba(34,197,94,0.18);  color:#22c55e; display:inline-block; padding:3px 8px; border-radius:5px; font-size:11px; font-weight:bold; }
+.ob-sl     { background:rgba(239,68,68,0.18);  color:#ef4444; display:inline-block; padding:3px 8px; border-radius:5px; font-size:11px; font-weight:bold; }
+.ob-delta  { background:rgba(234,179,8,0.18);  color:#eab308; display:inline-block; padding:3px 8px; border-radius:5px; font-size:11px; font-weight:bold; }
+.ob-open   { background:rgba(99,102,241,0.18); color:#818cf8; display:inline-block; padding:3px 8px; border-radius:5px; font-size:11px; font-weight:bold; }
+
+/* P&L */
+.pnl-g { color:#22c55e; font-weight:bold; }
+.pnl-r { color:#ef4444; font-weight:bold; }
+.pnl-n { color:#9ca3af; font-weight:bold; }
+
+/* Row tints */
+tr.erow-target { background-color: rgba(34,197,94,0.06) !important; }
+tr.erow-sl     { background-color: rgba(239,68,68,0.06) !important; }
+tr.erow-open   { background-color: rgba(99,102,241,0.04) !important; }
+
+/* Legend */
+.entry-leg {
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 5px;
+}
+.leg-ce-long  { background:rgba(34,197,94,0.12);  color:#22c55e; }
+.leg-pe-long  { background:rgba(239,68,68,0.12);  color:#ef4444; }
+.leg-ce-cover { background:rgba(20,184,166,0.12); color:#14b8a6; }
+.leg-pe-cover { background:rgba(249,115,22,0.12); color:#f97316; }
+
+</style>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="/static/js/greeks.js?v=20260606_1"></script>
+<script src="/static/js/greeks.js?v=20260606_2"></script>
 
 {% endblock %}

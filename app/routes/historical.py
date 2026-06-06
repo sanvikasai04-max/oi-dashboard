@@ -6,7 +6,7 @@ from app.database import (
     SessionLocal,
     OISnapshot
 )
-from app.config import TRACK_EXPIRY
+from app.config import TRACK_EXPIRY, get_data_iso_date
 
 router = APIRouter()
 
@@ -26,9 +26,19 @@ def get_historical_data(limit: int = 500):
         # FETCH LIMITED DATA
         # =================================
 
+        query = db.query(OISnapshot).filter(
+            OISnapshot.expiry == TRACK_EXPIRY
+        )
+
+        data_iso_date = get_data_iso_date()
+
+        if data_iso_date:
+            query = query.filter(
+                OISnapshot.timestamp.like(f"{data_iso_date}%")
+            )
+
         rows = (
-            db.query(OISnapshot)
-            .filter(OISnapshot.expiry == TRACK_EXPIRY)
+            query
             .order_by(OISnapshot.id.desc())
             .limit(limit)
             .all()

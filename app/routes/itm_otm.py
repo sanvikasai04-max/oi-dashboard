@@ -10,9 +10,10 @@ from app.database import (
 from app.calculations import (
     get_atm_strike,
     generate_oi_table,
-    generate_greek_spikes
+    generate_greek_spikes,
+    filter_market_session
 )
-from app.config import get_data_date, TRACK_EXPIRY
+from app.config import get_data_date, get_data_iso_date, TRACK_EXPIRY
 
 router = APIRouter()
 
@@ -80,6 +81,16 @@ def get_dashboard_data(interval: str = "5m"):
         # =================================
 
         df["timestamp"] = pd.to_datetime(df["timestamp"])
+        data_iso_date = get_data_iso_date()
+
+        if data_iso_date:
+            df = df[df["timestamp"].dt.strftime("%Y-%m-%d") == data_iso_date]
+
+        df = filter_market_session(df)
+
+        if df.empty:
+            return {"error": "No data found for selected trading session"}
+
         df = df.sort_values("timestamp")
 
         latest = df.iloc[-1]
@@ -229,6 +240,16 @@ def get_itm_data(interval: str = "5m"):
         # =================================
 
         df["timestamp"] = pd.to_datetime(df["timestamp"])
+        data_iso_date = get_data_iso_date()
+
+        if data_iso_date:
+            df = df[df["timestamp"].dt.strftime("%Y-%m-%d") == data_iso_date]
+
+        df = filter_market_session(df)
+
+        if df.empty:
+            return {"error": "No data found for selected trading session"}
+
         df = df.sort_values("timestamp")
 
         latest = df.iloc[-1]
