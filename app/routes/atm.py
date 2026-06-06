@@ -34,6 +34,11 @@ GAMMA_MOMENTUM  = 20.0
 SL_PCT          = 0.30   # 30% below entry LTP
 TARGET_PCT      = 0.50   # 50% above entry LTP
 DELTA_EXIT_ABS  = 0.40   # exit if |delta| drops below this
+MIN_ENTRY_LTP   = 5.0
+MIN_OI_CHANGE   = 100000
+MIN_OI_CHANGE_PCT = 1.0
+MIN_VOLUME_CHANGE = 100000
+MIN_SIGNAL_SCORE = 70
 
 # =========================================
 # HELPERS
@@ -85,6 +90,165 @@ def _can_enter(delta):
     return abs(delta) >= DELTA_EXIT_ABS
 
 
+def _pct_change(current_value, previous_value):
+    return calculate_percent_change(current_value, previous_value)
+
+
+def _confidence(score):
+    if score >= 85:
+        return "High"
+    if score >= 70:
+        return "Medium"
+    return "Low"
+
+
+def _score_entry(metrics, mode):
+    score = 0
+    reasons = []
+
+    if mode == "fresh" and metrics["buildup"] == "Long Build-up":
+        score += 20
+        reasons.append("long buildup")
+    elif mode == "cover" and metrics["buildup"] == "Short Covering":
+        score += 20
+        reasons.append("short covering")
+
+    if metrics["price_change"] > 0:
+        score += 10
+        reasons.append("price up")
+
+    if abs(metrics["oi_change"]) >= MIN_OI_CHANGE:
+        score += 15
+        reasons.append("OI change")
+
+    if abs(metrics["oi_change_pct"]) >= MIN_OI_CHANGE_PCT:
+        score += 10
+        reasons.append("OI %")
+
+    if metrics["volume_change"] >= MIN_VOLUME_CHANGE:
+        score += 10
+        reasons.append("volume")
+
+    if metrics["delta_abs"] >= DELTA_EXIT_ABS:
+        score += 15
+        reasons.append("delta strong")
+
+    if metrics["delta_change"] >= (DELTA_FRESH if mode == "fresh" else DELTA_MOMENTUM):
+        score += 10
+        reasons.append("delta rising")
+
+    if metrics["gamma_change"] >= (GAMMA_FRESH if mode == "fresh" else GAMMA_MOMENTUM):
+        score += 10
+        reasons.append("gamma rising")
+
+    return score, ", ".join(reasons)
+
+
+def _option_metrics(curr, prev, opt):
+    prefix = "call" if opt == "CE" else "put"
+    price_col = f"{prefix}_price"
+    oi_col = f"{prefix}_oi"
+    volume_col = f"{prefix}_volume"
+    delta_col = f"{prefix}_delta"
+    gamma_col = f"{prefix}_gamma"
+
+    price_change = curr[price_col] - prev[price_col]
+    oi_change = curr[oi_col] - prev[oi_col]
+    volume_change = curr[volume_col] - prev[volume_col]
+    delta_change = _pct_change(abs(curr[delta_col]), abs(prev[delta_col]))
+    gamma_change = _pct_change(curr[gamma_col], prev[gamma_col])
+    oi_change_pct = _pct_change(curr[oi_col], prev[oi_col])
+
+    return {
+        "opt": opt,
+        "price": curr[price_col],
+        "price_change": price_change,
+        "oi_change": oi_change,
+        "oi_change_pct": oi_change_pct,
+        "volume_change": volume_change,
+        "delta": curr[delta_col],
+        "delta_abs": abs(curr[delta_col]),
+        "delta_change": delta_change,
+        "gamma": curr[gamma_col],
+        "gamma_change": gamma_change,
+        "buildup": _classify(price_change, oi_change)
+    }
+
+
+def _passes_entry(metrics, mode):
+    if metrics["price"] < MIN_ENTRY_LTP:
+        return False
+
+    if not _can_enter(metrics["delta"]):
+        return False
+
+    if metrics["volume_change"] < MIN_VOLUME_CHANGE:
+        return False
+
+    if abs(metrics["oi_change"]) < MIN_OI_CHANGE:
+        return False
+
+    if abs(metrics["oi_change_pct"]) < MIN_OI_CHANGE_PCT:
+        return False
+
+    if mode == "fresh":
+        return (
+            metrics["buildup"] == "Long Build-up" and
+            metrics["delta_change"] >= DELTA_FRESH and
+            metrics["gamma_change"] >= GAMMA_FRESH
+        )
+
+    return (
+        metrics["buildup"] == "Short Covering" and
+        metrics["delta_change"] >= DELTA_MOMENTUM and
+        metrics["gamma_change"] >= GAMMA_MOMENTUM
+    )
+
+
+def _append_signal(signals, df_s, index, metrics, setup, bmin, tlbl, mode):
+    score, reason = _score_entry(metrics, mode)
+
+    if score < MIN_SIGNAL_SCORE:
+        return
+
+    ltp = round(float(metrics["price"]), 2)
+    sl = round(ltp * (1 - SL_PCT), 2)
+    tgt = round(ltp * (1 + TARGET_PCT), 2)
+    oc, ex_ltp, ex_time, pnl = _resolve_outcome(
+        df_s,
+        index,
+        metrics["opt"],
+        sl,
+        tgt,
+        bmin
+    )
+
+    signals.append({
+        "time": tlbl,
+        "setup": setup,
+        "option": metrics["opt"],
+        "entry_ltp": ltp,
+        "sl": sl,
+        "target": tgt,
+        "delta": round(float(metrics["delta"]), 4),
+        "delta_chg": float(metrics["delta_change"]),
+        "gamma": round(float(metrics["gamma"]), 6),
+        "gamma_chg": float(metrics["gamma_change"]),
+        "buildup": metrics["buildup"],
+        "oi_change": int(metrics["oi_change"]),
+        "oi_change_pct": float(metrics["oi_change_pct"]),
+        "price_change": round(float(metrics["price_change"]), 2),
+        "volume_change": int(metrics["volume_change"]),
+        "score": int(score),
+        "confidence": _confidence(score),
+        "reason": reason,
+        "outcome": oc,
+        "exit_ltp": float(ex_ltp),
+        "exit_time": ex_time,
+        "pnl_pct": float(pnl)
+    })
+
+
 def detect_entries(df, strike, interval_name):
     """
     Scan bucketed data for a single strike and return entry signals
@@ -126,81 +290,20 @@ def detect_entries(df, strike, interval_name):
         prev = df_s.iloc[i - 1]
         tlbl = _bucket_label(curr["bucket"], bmin)
 
-        # --- CE metrics ---
-        ce_build = _classify(
-            curr["call_price"] - prev["call_price"],
-            curr["call_oi"]    - prev["call_oi"]
-        )
-        ce_dc = calculate_percent_change(abs(curr["call_delta"]), abs(prev["call_delta"]))
-        ce_gc = calculate_percent_change(curr["call_gamma"],      prev["call_gamma"])
+        ce_metrics = _option_metrics(curr, prev, "CE")
+        pe_metrics = _option_metrics(curr, prev, "PE")
 
-        # --- PE metrics ---
-        pe_build = _classify(
-            curr["put_price"] - prev["put_price"],
-            curr["put_oi"]    - prev["put_oi"]
-        )
-        pe_dc = calculate_percent_change(abs(curr["put_delta"]), abs(prev["put_delta"]))
-        pe_gc = calculate_percent_change(curr["put_gamma"],      prev["put_gamma"])
+        if _passes_entry(ce_metrics, "fresh"):
+            _append_signal(signals, df_s, i, ce_metrics, "CE Long", bmin, tlbl, "fresh")
 
-        # ---- Setup 1: CE Long Fresh ----
-        if _can_enter(curr["call_delta"]) and ce_dc >= DELTA_FRESH and ce_gc >= GAMMA_FRESH and ce_build == "Long Build-up":
-            ltp    = round(curr["call_price"], 2)
-            sl     = round(ltp * (1 - SL_PCT), 2)
-            tgt    = round(ltp * (1 + TARGET_PCT), 2)
-            oc, ex_ltp, ex_time, pnl = _resolve_outcome(df_s, i, "CE", sl, tgt, bmin)
-            signals.append({
-                "time": tlbl, "setup": "CE Long", "option": "CE",
-                "entry_ltp": ltp, "sl": sl, "target": tgt,
-                "delta": round(curr["call_delta"], 4), "delta_chg": ce_dc,
-                "gamma": round(curr["call_gamma"], 6), "gamma_chg": ce_gc,
-                "buildup": ce_build,
-                "outcome": oc, "exit_ltp": ex_ltp, "exit_time": ex_time, "pnl_pct": pnl
-            })
+        if _passes_entry(pe_metrics, "fresh"):
+            _append_signal(signals, df_s, i, pe_metrics, "PE Long", bmin, tlbl, "fresh")
 
-        # ---- Setup 2: PE Long Fresh ----
-        if _can_enter(curr["put_delta"]) and pe_dc >= DELTA_FRESH and pe_gc >= GAMMA_FRESH and pe_build == "Long Build-up":
-            ltp    = round(curr["put_price"], 2)
-            sl     = round(ltp * (1 - SL_PCT), 2)
-            tgt    = round(ltp * (1 + TARGET_PCT), 2)
-            oc, ex_ltp, ex_time, pnl = _resolve_outcome(df_s, i, "PE", sl, tgt, bmin)
-            signals.append({
-                "time": tlbl, "setup": "PE Long", "option": "PE",
-                "entry_ltp": ltp, "sl": sl, "target": tgt,
-                "delta": round(curr["put_delta"], 4), "delta_chg": pe_dc,
-                "gamma": round(curr["put_gamma"], 6), "gamma_chg": pe_gc,
-                "buildup": pe_build,
-                "outcome": oc, "exit_ltp": ex_ltp, "exit_time": ex_time, "pnl_pct": pnl
-            })
+        if _passes_entry(ce_metrics, "cover"):
+            _append_signal(signals, df_s, i, ce_metrics, "CE Short Cover", bmin, tlbl, "cover")
 
-        # ---- Setup 3: CE Short Cover ----
-        if _can_enter(curr["call_delta"]) and ce_dc >= DELTA_MOMENTUM and ce_gc >= GAMMA_MOMENTUM and ce_build == "Short Covering":
-            ltp    = round(curr["call_price"], 2)
-            sl     = round(ltp * (1 - SL_PCT), 2)
-            tgt    = round(ltp * (1 + TARGET_PCT), 2)
-            oc, ex_ltp, ex_time, pnl = _resolve_outcome(df_s, i, "CE", sl, tgt, bmin)
-            signals.append({
-                "time": tlbl, "setup": "CE Short Cover", "option": "CE",
-                "entry_ltp": ltp, "sl": sl, "target": tgt,
-                "delta": round(curr["call_delta"], 4), "delta_chg": ce_dc,
-                "gamma": round(curr["call_gamma"], 6), "gamma_chg": ce_gc,
-                "buildup": ce_build,
-                "outcome": oc, "exit_ltp": ex_ltp, "exit_time": ex_time, "pnl_pct": pnl
-            })
-
-        # ---- Setup 4: PE Short Cover ----
-        if _can_enter(curr["put_delta"]) and pe_dc >= DELTA_MOMENTUM and pe_gc >= GAMMA_MOMENTUM and pe_build == "Short Covering":
-            ltp    = round(curr["put_price"], 2)
-            sl     = round(ltp * (1 - SL_PCT), 2)
-            tgt    = round(ltp * (1 + TARGET_PCT), 2)
-            oc, ex_ltp, ex_time, pnl = _resolve_outcome(df_s, i, "PE", sl, tgt, bmin)
-            signals.append({
-                "time": tlbl, "setup": "PE Short Cover", "option": "PE",
-                "entry_ltp": ltp, "sl": sl, "target": tgt,
-                "delta": round(curr["put_delta"], 4), "delta_chg": pe_dc,
-                "gamma": round(curr["put_gamma"], 6), "gamma_chg": pe_gc,
-                "buildup": pe_build,
-                "outcome": oc, "exit_ltp": ex_ltp, "exit_time": ex_time, "pnl_pct": pnl
-            })
+        if _passes_entry(pe_metrics, "cover"):
+            _append_signal(signals, df_s, i, pe_metrics, "PE Short Cover", bmin, tlbl, "cover")
 
     return signals
 
@@ -372,7 +475,7 @@ def get_greeks_data(
         hits   = [s for s in entry_signals if s["outcome"] == "Target Hit"]
         sls    = [s for s in entry_signals if s["outcome"] == "SL Hit"]
         d_exits= [s for s in entry_signals if s["outcome"] == "Delta Exit"]
-        net_pnl = round(sum(s["pnl_pct"] for s in closed), 1)
+        net_pnl = float(round(sum(s["pnl_pct"] for s in closed), 1))
 
         return {
             "spot":          spot,

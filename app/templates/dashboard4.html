@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="dash4-shell">
+    <div class="dash4-header">
+        <div>
+            <h3>Dashboard 4 - Candle Entries</h3>
+            <div class="dash4-sub">
+                Directional entries: bullish CE ATM/ITM, bearish PE OTM, with OI + Delta + Gamma confirmation
+            </div>
+        </div>
+        <div class="dash4-meta">
+            <span>Spot <strong id="d4-spot">--</strong></span>
+            <span>ATM <strong id="d4-atm">--</strong></span>
+            <span>Date <strong id="d4-date">--</strong></span>
+        </div>
+    </div>
+
+    <div class="dash4-score">
+        <div class="dash4-card">
+            <div>Total</div>
+            <strong id="d4-total">--</strong>
+        </div>
+        <div class="dash4-card">
+            <div>Wins</div>
+            <strong id="d4-wins">--</strong>
+        </div>
+        <div class="dash4-card">
+            <div>Losses</div>
+            <strong id="d4-losses">--</strong>
+        </div>
+        <div class="dash4-card">
+            <div>Open</div>
+            <strong id="d4-open">--</strong>
+        </div>
+        <div class="dash4-card">
+            <div>Net P&amp;L</div>
+            <strong id="d4-pnl">--</strong>
+        </div>
+    </div>
+
+    <div class="dash4-chart-wrap">
+        <div class="dash4-chart-title">
+            <span id="chart-title">Select a signal</span>
+            <span id="chart-plan">--</span>
+        </div>
+        <canvas id="entry-chart" width="1200" height="430"></canvas>
+    </div>
+
+    <div class="table-card">
+        <div class="table-responsive">
+            <table class="table table-dark table-hover dash4-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Direction</th>
+                        <th>Zone</th>
+                        <th>Setup</th>
+                        <th>Strike</th>
+                        <th>Entry</th>
+                        <th>SL</th>
+                        <th>T1</th>
+                        <th>T2</th>
+                        <th>Exit</th>
+                        <th>Exit Time</th>
+                        <th>P&amp;L</th>
+                        <th>Delta</th>
+                        <th>Delta %</th>
+                        <th>Gamma</th>
+                        <th>Gamma %</th>
+                        <th>OI Change</th>
+                        <th>OI %</th>
+                        <th>Score</th>
+                        <th>Reason</th>
+                    </tr>
+                </thead>
+                <tbody id="d4-signals-body">
+                    <tr>
+                        <td colspan="20" style="padding:30px; color:#9ca3af;">Loading entries...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<style>
+.dash4-shell {
+    padding: 18px 6px 30px;
+}
+.dash4-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+.dash4-header h3 {
+    margin: 0;
+}
+.dash4-sub {
+    color: #9ca3af;
+    font-size: 13px;
+    margin-top: 4px;
+}
+.dash4-meta {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.dash4-meta span,
+.dash4-card {
+    background: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    padding: 8px 12px;
+}
+.dash4-score {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(110px, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+}
+.dash4-card div {
+    color: #9ca3af;
+    font-size: 12px;
+}
+.dash4-card strong {
+    display: block;
+    margin-top: 2px;
+    font-size: 22px;
+}
+.dash4-chart-wrap {
+    background: #0f172a;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    overflow: hidden;
+}
+.dash4-chart-title {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border-bottom: 1px solid #374151;
+    color: #e5e7eb;
+    font-size: 13px;
+}
+#entry-chart {
+    display: block;
+    width: 100%;
+    height: 430px;
+}
+.dash4-table {
+    min-width: 1500px;
+}
+.dash4-table tbody tr {
+    cursor: pointer;
+}
+.dash4-table tbody tr.active-signal td {
+    background-color: rgba(59, 130, 246, 0.18) !important;
+}
+.tag {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 5px;
+    font-size: 11px;
+    font-weight: bold;
+    white-space: nowrap;
+}
+.tag-bull { background: rgba(34,197,94,0.18); color: #22c55e; }
+.tag-bear { background: rgba(239,68,68,0.18); color: #ef4444; }
+.tag-mid { background: rgba(234,179,8,0.18); color: #eab308; }
+.tag-blue { background: rgba(59,130,246,0.18); color: #60a5fa; }
+@media screen and (max-width: 900px) {
+    .dash4-score {
+        grid-template-columns: repeat(2, minmax(110px, 1fr));
+    }
+}
+</style>
+
+<script src="/static/js/dashboard4.js?v=20260606_1"></script>
+
+{% endblock %}

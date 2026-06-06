@@ -16,6 +16,7 @@ from app.collector import collect_and_store
 from app.routes.atm import router as atm_router
 from app.routes.itm_otm import router as itm_otm_router
 from app.routes.historical import router as historical_router
+from app.routes.dashboard4 import router as dashboard4_router
 
 # =========================================
 # FASTAPI APP
@@ -30,6 +31,7 @@ app = FastAPI()
 app.include_router(atm_router)
 app.include_router(itm_otm_router)
 app.include_router(historical_router)
+app.include_router(dashboard4_router)
 
 # =========================================
 # STATIC FILES
@@ -149,4 +151,13 @@ def greeks_page(request: Request):
     return templates.TemplateResponse(
         request,
         "greeks.html"
+    )
+
+
+@app.get("/dashboard4")
+def dashboard4_page(request: Request):
+
+    return templates.TemplateResponse(
+        request,
+        "dashboard4.html"
     )
