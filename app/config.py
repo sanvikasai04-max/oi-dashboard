@@ -6,7 +6,7 @@ import re
 # =========================================
 
 CLIENT_ID = "1107485546"
-ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzgwNzE2OTA1LCJpYXQiOjE3ODA2MzA1MDUsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTA3NDg1NTQ2In0.rNCNXFtLvADrqKMwnYd-KJls0M86-Mb72TvLSd7giTtvZxlPeSiWyTSn2l_Ncy8TrPHVXsc0t4rjaPi1HFE39A"
+ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzgxMTQ5NjU2LCJpYXQiOjE3ODEwNjMyNTYsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTA3NDg1NTQ2In0.QrL8HtwG-EJAMIySAtuoYXB8j9bupWY90hDus5YKrEVl_QS31Z-sDC5RI7KfZFTljbkSvYUV1In34xnCVVGDQg"
 # =========================================
 # APP SETTINGS
 # =========================================
@@ -31,9 +31,9 @@ ITM_OTM_DISTANCE = 1
 
 today = dt.datetime.now().strftime("%Y_%m_%d")
 
-#DATABASE_URL = f"sqlite:///./oi_{today}.db"
+DATABASE_URL = f"sqlite:///./oi_{today}.db"
 
-DATABASE_URL = "sqlite:///./oi_2026_06_02.db"
+#DATABASE_URL = "sqlite:///./oi_2026_06_02.db"
 
 
 def get_database_date():
@@ -75,7 +75,7 @@ UNDERLYING_SEGMENT = "IDX_I"
 # EXPIRY SETTINGS (Which expiry to track)
 # =========================================
 
-TRACK_EXPIRY = "2026-06-09"  # Current week Thursday (June 9)
+TRACK_EXPIRY = "2026-06-16"  # Current week Thursday (June 16)
 
 # =========================================
 # DEFAULT TIMEFRAME

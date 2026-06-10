@@ -18,6 +18,7 @@ Professional HTML-based Option Chain OI Monitoring System using:
 Supports:
 - ATM Monitoring
 - ITM / OTM Monitoring
+- Dashboard 4 Candle Entries
 - OI Build-up Analysis
 - Delta / Gamma / IV
 - Multi-Timeframe Analysis
@@ -47,6 +48,16 @@ Supports:
 - Trap analysis
 - Liquidity analysis
 - Institutional positioning
+
+---
+
+## Dashboard 4 - Candle Entries
+- Candle view with entry markers
+- Directional entries using OI + Delta + Gamma
+- Bullish market: CE ATM / ITM entries
+- Bearish market: PE OTM entries
+- Stop loss, Target 1, Target 2
+- Exit time and P&L tracking
 
 ---
 
@@ -104,7 +115,7 @@ oi-dashboard/
 
 commands:
 uvicorn app.main:app --reload
-http://127.0.0.1:8000/dashboard
+http://127.0.0.1:8000/dashboardhttp://127.0.0.1:8000/dashboard
 http://127.0.0.1:8000/itm
 http://127.0.0.1:8000/greeks
-
+http://127.0.0.1:8000/dashboard4

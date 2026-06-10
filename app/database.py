@@ -204,3 +204,12 @@ def fetch_snapshots():
     finally:
 
         db.close()
+
+def get_active_expiry(db):
+    latest = (
+        db.query(OISnapshot.expiry)
+        .filter(OISnapshot.expiry.isnot(None))
+        .order_by(OISnapshot.timestamp.desc())
+        .first()
+    )
+    return latest[0] if latest else None

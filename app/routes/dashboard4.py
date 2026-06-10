@@ -9,10 +9,9 @@ from app.calculations import (
 )
 from app.config import (
     get_data_date,
-    get_data_iso_date,
-    TRACK_EXPIRY
+    get_data_iso_date
 )
-from app.database import OISnapshot, SessionLocal
+from app.database import OISnapshot, SessionLocal, get_active_expiry
 
 router = APIRouter()
 
@@ -33,8 +32,12 @@ def _fetch_session_df():
     db: Session = SessionLocal()
 
     try:
+        active_expiry = get_active_expiry(db)
+        if not active_expiry:
+            return {"error": "No expiry found in DB"}
+
         rows = db.query(OISnapshot).filter(
-            OISnapshot.expiry == TRACK_EXPIRY
+            OISnapshot.expiry == active_expiry
         ).all()
 
         data = []

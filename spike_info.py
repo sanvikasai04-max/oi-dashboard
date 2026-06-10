@@ -66,15 +66,6 @@ for i in range(1, len(df)):
         curr["call_gamma"],
         prev["call_gamma"]
     )
-    print(
-        f"{time_label} | "
-        f"Prev CE Delta={prev['call_delta']:.6f} "
-        f"Curr CE Delta={curr['call_delta']:.6f} "
-        f"Delta%={ce_delta_pct:.2f} | "
-        f"Prev CE Gamma={prev['call_gamma']:.6f} "
-        f"Curr CE Gamma={curr['call_gamma']:.6f} "
-        f"Gamma%={ce_gamma_pct:.2f}"
-    )
 
     if (
         curr["call_delta"] > prev["call_delta"]
@@ -104,15 +95,6 @@ for i in range(1, len(df)):
         prev["put_gamma"]
     )
 
-    print(
-        f"{time_label} | "
-        f"Prev PE Delta={prev['put_delta']:.6f} "
-        f"Curr PE Delta={curr['put_delta']:.6f} "
-        f"Delta%={pe_delta_pct:.2f} | "
-        f"Prev PE Gamma={prev['put_gamma']:.6f} "
-        f"Curr PE Gamma={curr['put_gamma']:.6f} "
-        f"Gamma%={pe_gamma_pct:.2f}"
-    )
 
     if (
         abs(curr["put_delta"]) > abs(prev["put_delta"])

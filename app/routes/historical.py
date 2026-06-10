@@ -4,9 +4,10 @@ import pandas as pd
 
 from app.database import (
     SessionLocal,
-    OISnapshot
+    OISnapshot,
+    get_active_expiry
 )
-from app.config import TRACK_EXPIRY, get_data_iso_date
+from app.config import get_data_iso_date
 
 router = APIRouter()
 
@@ -26,8 +27,12 @@ def get_historical_data(limit: int = 500):
         # FETCH LIMITED DATA
         # =================================
 
+        active_expiry = get_active_expiry(db)
+        if not active_expiry:
+            return {"error": "No expiry found in DB"}
+
         query = db.query(OISnapshot).filter(
-            OISnapshot.expiry == TRACK_EXPIRY
+            OISnapshot.expiry == active_expiry
         )
 
         data_iso_date = get_data_iso_date()

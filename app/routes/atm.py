@@ -4,7 +4,8 @@ import pandas as pd
 
 from app.database import (
     SessionLocal,
-    OISnapshot
+    OISnapshot,
+    get_active_expiry
 )
 
 from app.calculations import (
@@ -17,8 +18,7 @@ from app.calculations import (
 from app.config import (
     get_data_date,
     get_data_iso_date,
-    STRIKE_STEP,
-    TRACK_EXPIRY
+    STRIKE_STEP
 )
 
 router = APIRouter()
@@ -318,8 +318,12 @@ def get_atm_data(interval: str = "5m"):
     db: Session = SessionLocal()
 
     try:
+        active_expiry = get_active_expiry(db)
+        if not active_expiry:
+            return {"error": "No expiry found in DB"}
+
         rows = db.query(OISnapshot).filter(
-            OISnapshot.expiry == TRACK_EXPIRY
+            OISnapshot.expiry == active_expiry
         ).all()
 
         if not rows:
@@ -404,8 +408,12 @@ def get_greeks_data(
     db: Session = SessionLocal()
 
     try:
+        active_expiry = get_active_expiry(db)
+        if not active_expiry:
+            return {"error": "No expiry found in DB"}
+
         rows = db.query(OISnapshot).filter(
-            OISnapshot.expiry == TRACK_EXPIRY
+            OISnapshot.expiry == active_expiry
         ).all()
 
         if not rows:

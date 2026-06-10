@@ -214,6 +214,359 @@ table {
 
 }
 
+/* =========================================
+   EMA STRATEGY DASHBOARD
+========================================= */
+
+.ema-shell {
+    padding: 18px 6px 30px;
+}
+
+.ema-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+
+.ema-header h3,
+.ema-section-title h5 {
+    margin: 0;
+}
+
+.ema-muted,
+.ema-section-title span {
+    color: #9ca3af;
+    font-size: 13px;
+    margin-top: 4px;
+}
+
+.ema-meta {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.ema-meta span,
+.ema-card {
+    background: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    padding: 8px 12px;
+}
+
+.ema-score {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(110px, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.ema-card span {
+    display: block;
+    color: #9ca3af;
+    font-size: 12px;
+}
+
+.ema-card strong {
+    display: block;
+    margin-top: 2px;
+    font-size: 22px;
+}
+
+.ema-section {
+    margin-top: 16px;
+}
+
+.ema-section-title {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: baseline;
+    margin-bottom: 8px;
+}
+
+.ema-table {
+    min-width: 1120px;
+}
+
+.ema-table th,
+.ema-table td {
+    white-space: nowrap;
+}
+
+.ema-table .ema-reason {
+    min-width: 280px;
+    white-space: normal;
+    text-align: left;
+}
+
+.ema-profit {
+    color: #22c55e !important;
+}
+
+.ema-loss {
+    color: #ef4444 !important;
+}
+
+.ema-empty {
+    padding: 28px !important;
+    color: #9ca3af !important;
+    text-align: center !important;
+}
+
+@media screen and (max-width: 900px) {
+    .ema-score {
+        grid-template-columns: repeat(2, minmax(110px, 1fr));
+    }
+
+    .ema-section-title {
+        display: block;
+    }
+}
+
+.ema-terminal {
+    padding: 8px 6px 20px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+}
+
+.ema-hero-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 0 7px;
+    border-bottom: 1px solid #374151;
+    margin-bottom: 7px;
+}
+
+.ema-hero-line h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 800;
+    color: #f9fafb;
+    letter-spacing: 0;
+}
+
+.ema-kicker {
+    color: #60a5fa;
+    font-size: 11px;
+    text-transform: uppercase;
+    font-weight: 700;
+}
+
+.ema-market-pill {
+    border: 1px solid #4b5563;
+    padding: 5px 10px;
+    font-weight: 800;
+    font-size: 12px;
+    color: #e5e7eb;
+    background: #111827;
+    white-space: nowrap;
+}
+
+.ema-market-live {
+    border-color: rgba(34, 197, 94, 0.75);
+    color: #86efac;
+    background: rgba(34, 197, 94, 0.12);
+}
+
+.ema-market-closed {
+    border-color: rgba(239, 68, 68, 0.75);
+    color: #fca5a5;
+    background: rgba(239, 68, 68, 0.12);
+}
+
+.ema-topline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 8px;
+    color: #e5e7eb;
+}
+
+.ema-topline span {
+    color: #cbd5e1;
+}
+
+.ema-status-value {
+    display: inline-block;
+    border: 1px solid #374151;
+    padding: 2px 6px;
+    margin-left: 2px;
+    font-weight: 800;
+    background: #111827;
+}
+
+.ema-status-mode,
+.ema-status-data {
+    color: #93c5fd;
+    border-color: rgba(96, 165, 250, 0.55);
+    background: rgba(59, 130, 246, 0.12);
+}
+
+.ema-status-market,
+.ema-status-failed {
+    color: #fca5a5;
+    border-color: rgba(239, 68, 68, 0.6);
+    background: rgba(239, 68, 68, 0.12);
+}
+
+.ema-status-backdate {
+    color: #fde68a;
+    border-color: rgba(234, 179, 8, 0.6);
+    background: rgba(234, 179, 8, 0.12);
+}
+
+.ema-status-live {
+    color: #c4b5fd;
+    border-color: rgba(139, 92, 246, 0.55);
+    background: rgba(139, 92, 246, 0.12);
+}
+
+.ema-status-success {
+    color: #86efac;
+    border-color: rgba(34, 197, 94, 0.6);
+    background: rgba(34, 197, 94, 0.12);
+}
+
+.ema-live-note {
+    border: 1px solid #374151;
+    padding: 5px 8px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: #d1d5db;
+    background: #111827;
+}
+
+.ema-live-table,
+.ema-csv-paths {
+    border: 1px solid #374151;
+    padding: 6px 8px;
+    margin-bottom: 8px;
+    background: #0f172a;
+    color: #d1d5db;
+}
+
+.ema-csv-paths {
+    display: grid;
+    gap: 5px;
+}
+
+.ema-csv-paths small {
+    color: #9ca3af;
+    overflow-wrap: anywhere;
+}
+
+.ema-toggle-button {
+    background: #1f2937;
+    color: #e5e7eb;
+    border: 1px solid #4b5563;
+    padding: 5px 9px;
+    margin: 2px 0 8px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+}
+
+.ema-toggle-button:hover {
+    background: #374151;
+}
+
+.ema-live-ok {
+    border-color: rgba(34, 197, 94, 0.55);
+    color: #86efac;
+}
+
+.ema-live-warn {
+    border-color: rgba(234, 179, 8, 0.55);
+    color: #fde68a;
+}
+
+.ema-live-error {
+    border-color: rgba(239, 68, 68, 0.65);
+    color: #fca5a5;
+}
+
+.ema-mini-title {
+    margin: 8px 0 3px;
+    color: #d1d5db;
+    font-weight: 700;
+}
+
+.ema-tf-grid {
+    display: grid;
+    grid-template-columns: minmax(260px, 0.8fr) minmax(420px, 1.2fr);
+    gap: 10px;
+    align-items: start;
+}
+
+.ema-terminal-table {
+    min-width: 980px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+    border-color: #374151;
+}
+
+.ema-terminal-table th,
+.ema-terminal-table td {
+    padding: 2px 6px !important;
+    font-size: 12px !important;
+    line-height: 1.15;
+    white-space: nowrap;
+    text-align: right;
+}
+
+.ema-stats-table {
+    min-width: 0;
+}
+
+.ema-terminal-table th:first-child,
+.ema-terminal-table td:first-child,
+.ema-trades-table th:nth-child(2),
+.ema-trades-table td:nth-child(2),
+.ema-trades-table th:nth-child(3),
+.ema-trades-table td:nth-child(3),
+.ema-trades-table th:nth-child(15),
+.ema-trades-table td:nth-child(15) {
+    text-align: left;
+}
+
+.ema-buy,
+.ema-green {
+    color: #00ff40 !important;
+    font-weight: 700;
+}
+
+.ema-sell,
+.ema-red {
+    color: #ff4d6d !important;
+    font-weight: 700;
+}
+
+.ema-amber {
+    color: #fbbf24 !important;
+    font-weight: 700;
+}
+
+.ema-muted-cell {
+    color: #9ca3af !important;
+}
+
+.ema-empty-inline {
+    color: #9ca3af;
+    padding: 4px 0;
+}
+
+@media screen and (max-width: 900px) {
+    .ema-tf-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 .long-unwind {
 
     background-color: rgba(59, 130, 246, 0.20);

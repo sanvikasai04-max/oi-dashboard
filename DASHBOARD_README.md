@@ -14,6 +14,7 @@ This project is a FastAPI-based Nifty option-chain dashboard. It stores option-c
 - Percentage change for Delta, Gamma, and IV
 - Multi-timeframe views: `5m`, `15m`, `30m`, `1hr`
 - ATM, OTM, and ITM strike monitoring
+- Dashboard 4 candle entries with SL, targets, exits, Greeks, OI, and P&L
 
 ## Main Dashboard Pages
 
@@ -22,6 +23,8 @@ Local PC URLs:
 ```text
 ATM / OTM Dashboard: http://127.0.0.1:8000/dashboard
 ITM Dashboard:       http://127.0.0.1:8000/itm
+Greeks Dashboard:    http://127.0.0.1:8000/greeks
+Dashboard 4:         http://127.0.0.1:8000/dashboard4
 ```
 
 Remote/mobile URLs using ngrok:
@@ -29,6 +32,31 @@ Remote/mobile URLs using ngrok:
 ```text
 ATM / OTM Dashboard: https://insessorial-tess-unlean.ngrok-free.dev/dashboard
 ITM Dashboard:       https://insessorial-tess-unlean.ngrok-free.dev/itm
+Greeks Dashboard:    https://insessorial-tess-unlean.ngrok-free.dev/greeks
+Dashboard 4:         https://insessorial-tess-unlean.ngrok-free.dev/dashboard4
+```
+
+## Dashboard 4 - Candle Entries
+
+Dashboard 4 is the directional trade-entry dashboard.
+
+It uses:
+
+- Candle chart view
+- OI buildup / short-covering confirmation
+- Delta strength and Delta % spike
+- Gamma acceleration
+- Direction filter:
+  - Bullish market: CE ATM / ITM entries, with breakout OTM CE support
+  - Bearish market: PE OTM entries
+- Entry LTP, stop loss, Target 1, Target 2
+- Exit time, exit LTP, and P&L %
+- Signal score and reason text
+
+Open locally:
+
+```text
+http://127.0.0.1:8000/dashboard4
 ```
 
 ## Technology Stack
@@ -140,6 +168,8 @@ Open:
 ```text
 http://127.0.0.1:8000/dashboard
 http://127.0.0.1:8000/itm
+http://127.0.0.1:8000/greeks
+http://127.0.0.1:8000/dashboard4
 ```
 
 ## Run For Mobile / Remote Access
@@ -206,6 +236,13 @@ Historical endpoint:
 
 ```text
 GET /api/historical?limit=500
+```
+
+Dashboard 4 endpoint:
+
+```text
+GET /api/dashboard4
+GET /api/dashboard4/candles?strike=23400&option=CE
 ```
 
 Supported interval values:
