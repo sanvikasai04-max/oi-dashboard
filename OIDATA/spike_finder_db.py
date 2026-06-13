@@ -16,23 +16,11 @@ from __future__ import annotations
 import sqlite3
 import argparse
 import re
-import sys
 from pathlib import Path
 
 import pandas as pd
 
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
-
 THRESH = 10.0  # % change threshold
-
-STRATEGY3_DIR = Path(
-    r"C:\Users\Vidya sagar\OneDrive\Desktop\myscripts\StrategyBuilder\Strategy3MAGreeks"
-)
-DEFAULT_NIFTY_EXCEL = Path(
-    r"C:\Users\Vidya sagar\OneDrive\Desktop\myscripts\StrategyBuilder\nifty50database\nifty_live_all_timeframes.xlsx"
-)
 
 
 def pct(curr, prev):
@@ -151,96 +139,12 @@ def report_day(df: pd.DataFrame, date, side: str):
         print(g_then_d[["strike","t1","gamma_pct_t1","t2","delta_pct_t2"]].to_string(index=False))
 
 
-def _load_final_engine():
-    if not STRATEGY3_DIR.exists():
-        raise SystemExit(f"Strategy3MAGreeks folder not found: {STRATEGY3_DIR}")
-    if str(STRATEGY3_DIR) not in sys.path:
-        sys.path.insert(0, str(STRATEGY3_DIR))
-    import greeks_signal_engine_final as engine
-    return engine
-
-
-def run_engine_entries(selected: list[Path], args):
-    engine = _load_final_engine()
-
-    frames = []
-    for db_file in selected:
-        df = engine.load_oi_db(db_file)
-        if not df.empty:
-            frames.append(df)
-
-    if not frames:
-        raise SystemExit("No rows loaded from selected OI DB files.")
-
-    history = pd.concat(frames, ignore_index=True)
-    from_date = pd.Timestamp(args.from_date).date()
-    to_date = pd.Timestamp(args.to_date).date() if args.to_date else None
-    history = history[history["timestamp"].dt.date >= from_date]
-    if to_date:
-        history = history[history["timestamp"].dt.date <= to_date]
-    history = engine._clean_oi(history)
-
-    indicators = engine.load_nifty_indicators(args.nifty_excel, args.nifty_sheet)
-    signals = engine.generate_signals(history, indicators, debug=args.debug)
-
-    print("\n" + "=" * 132)
-    print("  FINAL ENGINE ENTRY SIGNALS  (from spike_finder_db OI source)")
-    print("=" * 132)
-    print(f"  OI files      : {len(selected)}")
-    print(f"  OI rows       : {len(history):,}")
-    print(f"  OI range      : {history['timestamp'].min()} -> {history['timestamp'].max()}")
-    print(f"  Nifty filters : {'ON' if not indicators.empty else 'OFF'}")
-    print(f"  Entries       : {len(signals)}")
-
-    if signals.empty:
-        return signals
-
-    cols = [
-        "entry_time", "option", "strike", "strike_type", "expiry",
-        "spot", "atm", "option_entry_price", "tier", "score",
-        "oi_type", "opp_oi_type", "delta_pct", "gamma_pct",
-        "iv_pct", "price_pct", "cross_confirm",
-        "vwap_at_entry", "ema9_at_entry", "ema200_at_entry",
-        "spot_vs_vwap", "spot_vs_200ma", "reasons",
-    ]
-    cols = [c for c in cols if c in signals.columns]
-    view = signals[cols].copy()
-
-    if args.export:
-        out = Path(args.export)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        view.to_csv(out, index=False)
-        print(f"  Exported      : {out}")
-
-    if args.max_print and len(view) > args.max_print:
-        print(f"\nShowing first {args.max_print} of {len(view)} entries. Export has all rows.")
-        print(view.head(args.max_print).to_string(index=False, max_colwidth=70))
-    else:
-        print("\n" + view.to_string(index=False, max_colwidth=70))
-    print("\n" + "-" * 132)
-    print(signals.groupby([signals["entry_time"].dt.date, "option"]).size().to_string())
-    print("-" * 132)
-    return signals
-
-
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--oi-db", required=True, help="Folder containing oi_*.db files, or a single .db file")
     p.add_argument("--from-date", required=True, help="YYYY-MM-DD — start reading from this date")
     p.add_argument("--to-date", default=None, help="YYYY-MM-DD — optional end date (default: latest available)")
     p.add_argument("--threshold", type=float, default=10.0, help="spike threshold %% (default 10)")
-    p.add_argument("--engine-entries", action="store_true",
-                   help="Run greeks_signal_engine_final.py entry algorithm and print accepted entries")
-    p.add_argument("--nifty-excel", default=str(DEFAULT_NIFTY_EXCEL),
-                   help="Nifty 1min Excel for VWAP/EMA filters used by final engine")
-    p.add_argument("--nifty-sheet", default="1min",
-                   help="Nifty Excel sheet name used by final engine")
-    p.add_argument("--export", default=None,
-                   help="Optional CSV export path for --engine-entries output")
-    p.add_argument("--debug", action="store_true",
-                   help="Print final-engine rejection counts in --engine-entries mode")
-    p.add_argument("--max-print", type=int, default=200,
-                   help="Max rows to print in --engine-entries mode; use 0 to print all")
     args = p.parse_args()
 
     global THRESH
@@ -268,10 +172,6 @@ def main():
 
     if not selected:
         raise SystemExit(f"No oi_*.db files found from {args.from_date} onwards in {args.oi_db}")
-
-    if args.engine_entries:
-        run_engine_entries(selected, args)
-        return
 
     for db_file in selected:
         date = _date_from_filename(db_file)
