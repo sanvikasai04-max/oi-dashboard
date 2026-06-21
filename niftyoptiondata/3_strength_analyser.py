@@ -134,6 +134,21 @@ Exit logic added for better option-point capture:
        - FLOW >= SUPER_MOMENTUM_FLOW_SCORE
        - same-side build >= SUPER_MOMENTUM_SIDE_COUNT
        - opposite-side support >= SUPER_MOMENTUM_SIDE_COUNT
+
+  6. Strict price-momentum override quality
+     A high option price % candle alone is not enough. In October/December logs,
+     many losing trades had P% > 10 but BEST MOVE was tiny and BAD MOVE was deep.
+     That means the candle was only a spike, not a supported trend.
+
+     If price momentum is used to bypass the 200MA/chop filter, require:
+       - FLOW >= MOMENTUM_OVERRIDE_MIN_FLOW
+       - same-side build >= MOMENTUM_OVERRIDE_MIN_SAME_SIDE
+       - opposite-side support >= MOMENTUM_OVERRIDE_MIN_OPP_SUPPORT
+       - EMA20 and EMA50 slope moving with trade direction
+
+     Example:
+       CE entry needs CE_BUY plus PE_SELL support.
+       PE entry needs PE_BUY plus CE_SELL support.
 """
 
 import argparse
@@ -239,6 +254,12 @@ MAX_PRICE_XPCT = 20
 USE_PRICE_MOMENTUM_OVERRIDE = True
 PRICE_MOMENTUM_ENTRY_PCT = 10
 ALLOW_PRICE_MOMENTUM_OVEREXTENDED = True
+STRICT_MOMENTUM_OVERRIDE_QUALITY = True
+MOMENTUM_OVERRIDE_MIN_FLOW = 12
+MOMENTUM_OVERRIDE_MIN_SAME_SIDE = 3
+MOMENTUM_OVERRIDE_MIN_OPP_SUPPORT = 2
+MOMENTUM_OVERRIDE_EMA20_SLOPE_MIN = 3
+MOMENTUM_OVERRIDE_EMA50_SLOPE_MIN = 2
 
 # NIFTY 200 MA trend filter:
 #   If NIFTY close is below 200 MA -> block CE entries.
@@ -428,6 +449,8 @@ def load_nifty_200ma():
     nifty["ema20"] = nifty["nifty_close"].ewm(span=20, adjust=False).mean()
     nifty["ema50"] = nifty["nifty_close"].ewm(span=50, adjust=False).mean()
     nifty["nifty_ma200"] = nifty["nifty_close"].ewm(span=NIFTY_MA_PERIOD, adjust=False).mean()
+    nifty["ema20_slope"] = nifty["ema20"] - nifty["ema20"].shift(FLAT_20_LOOKBACK)
+    nifty["ema50_slope"] = nifty["ema50"] - nifty["ema50"].shift(FLAT_50_LOOKBACK)
 
     nifty["flat200"] = (nifty["nifty_ma200"] - nifty["nifty_ma200"].shift(FLAT_200_LOOKBACK)).abs() < FLAT_200_MAX_MOVE
     nifty["flat20"] = (nifty["ema20"] - nifty["ema20"].shift(FLAT_20_LOOKBACK)).abs() < FLAT_20_MAX_MOVE
@@ -452,6 +475,7 @@ def load_nifty_200ma():
 
     _NIFTY_200MA_CACHE = nifty[[
         "timestamp", "nifty_close", "nifty_ma200", "ema20", "ema50",
+        "ema20_slope", "ema50_slope",
         "flat200", "flat50", "flat20", "ma_compression", "many_crosses",
         "small_range", "ema20_50_crosses", "avg_range20", "chop_score",
     ]].dropna(subset=["nifty_ma200"])
@@ -561,6 +585,23 @@ def price_momentum_override(row, side, price_pct):
         return True, f"PRICE_MOMENTUM PE P%>={PRICE_MOMENTUM_ENTRY_PCT} NIFTY<=EMA20/50"
 
     return False, "wrong side EMA20/50"
+
+def momentum_override_slope_ok(row, side):
+    slope20 = row.get("ema20_slope", np.nan)
+    slope50 = row.get("ema50_slope", np.nan)
+    if pd.isna(slope20) or pd.isna(slope50):
+        return True
+
+    if side == "ce":
+        return (
+            slope20 >= MOMENTUM_OVERRIDE_EMA20_SLOPE_MIN and
+            slope50 >= MOMENTUM_OVERRIDE_EMA50_SLOPE_MIN
+        )
+
+    return (
+        slope20 <= -MOMENTUM_OVERRIDE_EMA20_SLOPE_MIN and
+        slope50 <= -MOMENTUM_OVERRIDE_EMA50_SLOPE_MIN
+    )
 
 def live_side_build_counts(full, ts, strike):
     nearby = full[
@@ -1437,6 +1478,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     chop_reject = 0
     chop_missing_count = 0
     momentum_override_count = 0
+    weak_momentum_override_reject = 0
     top_rows = []
 
     for row in layer1_rows:
@@ -1500,6 +1542,21 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         flow_score, same_side_count, opp_side_count, flow_reason = get_flow_confirm(
             full, ts, stk, side
         )
+
+        # Price momentum can override 200MA/chop only when the option move is
+        # supported by nearby strikes. This avoids one-candle P% spikes that
+        # show high price momentum but later produce tiny BEST and deep BAD.
+        momentum_override_used = momentum_ok and (not ma_ok or not chop_ok)
+        if STRICT_MOMENTUM_OVERRIDE_QUALITY and momentum_override_used:
+            momentum_quality_ok = (
+                flow_score >= MOMENTUM_OVERRIDE_MIN_FLOW and
+                same_side_count >= MOMENTUM_OVERRIDE_MIN_SAME_SIDE and
+                opp_side_count >= MOMENTUM_OVERRIDE_MIN_OPP_SUPPORT and
+                momentum_override_slope_ok(r, side)
+            )
+            if not momentum_quality_ok:
+                weak_momentum_override_reject += 1
+                continue
 
         if side == "ce":
             delta_ok = dp > 3
@@ -1638,7 +1695,8 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     if USE_PRICE_MOMENTUM_OVERRIDE:
         print(f"  {dim('Price momentum override:')} {bold('ON')}   "
               f"{dim('P% >=')} {bold(str(PRICE_MOMENTUM_ENTRY_PCT))}   "
-              f"{dim('MA/chop overrides used:')} {bold(str(momentum_override_count))}")
+              f"{dim('MA/chop overrides used:')} {bold(str(momentum_override_count))}   "
+              f"{dim('Weak overrides blocked:')} {bold(str(weak_momentum_override_reject))}")
     else:
         print(f"  {dim('Price momentum override:')} {bold('OFF')}")
     if ALLOW_OVERLAPPING_TRADES:
