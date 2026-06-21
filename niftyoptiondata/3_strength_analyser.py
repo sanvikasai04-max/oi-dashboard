@@ -1,4 +1,9 @@
 r"""
+
+python -m py_compile .\3_strength_analyser.py
+default command to check oi buildup and strength report for a single CSV file and date:
+python .\3_strength_analyser.py --csv oi_2024_01_02.csv --date 2024-01-02
+
 Script 3: Options Flow Strength Analyser
 ═════════════════════════════════════════
 Reads oi_2026_06_15.csv and produces a multi-layer strength report:
@@ -71,6 +76,82 @@ RUN MODES / COMMANDS
   3. HELP
      Command:
        python 3_strength_analyser.py --help
+
+  4. MONTHLY MODE WITH FULL ENTRY CONFIG
+     Command:
+       python 3_strength_analyser.py --monthly --month february --year 2024 --no-next-week --entry-start 09:45 --flow 10 --same-side 2 --late-start 14:15 --late-flow 12 --early-entry --early-start 09:25 --early-flow 16 --early-same-side 3 --early-opp 2 --early-price-pct 6 --early-volume-pct 40 --early-no-cross-confirm --no-relax-cross-side
+
+     Change --month and --year for the month you want to test.
+
+     Config explanation:
+       --monthly
+         Runs compact monthly summary mode instead of full single-day table.
+
+       --month february
+         Selects the month. You can use name or number, e.g. february, feb, 2.
+
+       --year 2024
+         Selects the year for monthly mode.
+
+       --no-next-week
+         Uses only dates inside the selected calendar month. Without this,
+         the first 7 days of next month are also included for weekly expiry
+         continuity.
+
+       --entry-start 09:45
+         Normal entries start only from 09:45. This avoids many gap-open
+         option spikes between 09:20 and 09:44.
+
+       --flow 10
+         Minimum cross-strike FLOW score for normal entries. Higher value
+         means fewer entries but stronger nearby-strike confirmation.
+
+       --same-side 2
+         Minimum same-side confirming strikes. Example for CE: at least 2
+         nearby CE strikes should show supportive buildup.
+
+       --late-start 14:15
+         After 14:15, late-entry rules apply because there is less time left
+         before the 3 PM force exit.
+
+       --late-flow 12
+         Minimum FLOW required after --late-start. This blocks weak late
+         entries unless confirmation is stronger than normal.
+
+       --early-entry
+         Enables special early OI entries before 09:45. Without this flag,
+         entries before --entry-start are blocked.
+
+       --early-start 09:25
+         Earliest time allowed for early OI entries. Here, early window is
+         09:25 to 09:44.
+
+       --early-flow 16
+         Minimum FLOW score for early OI entries. Early entries need stronger
+         confirmation than normal entries because open-period moves can reverse.
+
+       --early-same-side 3
+         Minimum same-side confirming strikes for early OI entries.
+
+       --early-opp 2
+         Minimum opposite-side support strikes for early OI entries.
+         CE example: PE side should also confirm by weakening/selling pressure.
+
+       --early-price-pct 6
+         Minimum option price percentage increase for early OI entries.
+
+       --early-volume-pct 40
+         Minimum option volume percentage increase for early OI entries.
+
+       --early-no-cross-confirm
+         Allows early entries even if reason does not contain OI_BULL/OI_BEAR.
+         This gives more entries for debugging, but it is looser and can add
+         bad open-period trades.
+
+       --no-relax-cross-side
+         Disables the relaxed same-side rule. With this flag, the script uses
+         the direct --same-side requirement and does not relax it just because
+         OI_BULL/OI_BEAR exists.
 
 Exit logic added for better option-point capture:
 
@@ -186,6 +267,20 @@ Exit logic added for better option-point capture:
 
      Gamma is used as a bonus, not a hard requirement, because option gamma can
      rise on both sides during fast moves.
+
+  9. Optional early super-strong OI entry
+     Normal entries still start at ENTRY_START = 09:45.
+     With --early-entry, the script can accept 09:25-09:45 entries only when
+     the OI buildup is very strong:
+       - FLOW >= EARLY_ENTRY_MIN_FLOW
+       - same-side strikes >= EARLY_ENTRY_MIN_SAME_SIDE
+       - opposite-side support >= EARLY_ENTRY_MIN_OPP_SUPPORT
+       - option price % >= EARLY_ENTRY_MIN_PRICE_PCT
+       - option volume % >= EARLY_ENTRY_MIN_VOLUME_PCT
+       - reason contains OI_BULL for CE or OI_BEAR for PE
+
+     This is meant for days like 2024-02-05 where CE buildup started strongly
+     before 09:45. It is not a blanket open-gap entry unlock.
 """
 
 import argparse
@@ -214,6 +309,9 @@ ATM_RANGE_POINTS  = 500
 STRIKE_STEP       = 50
 STRENGTH_PCT     = 60              # percentile threshold for "strong" (runtime)
 WEAK_PCT         = 40              # percentile threshold for "weak"  (runtime)
+OI_TABLE_PRICE_PCT = 3             # also show rows where option price builds >= 3%
+OI_TABLE_VOLUME_PCT = 3            # and option volume builds >= 3%
+OI_TABLE_PRICE_DROP_PCT = -3       # also show opposite-side weakness when price falls <= -3%
 
 SESSION_START    = dtime(9, 20)    # filter: keep rows from this time onward
 SESSION_END      = dtime(15, 30)   # filter: keep rows up to this time
@@ -230,6 +328,17 @@ DAILY_LOSS_LIMIT = 2             # after this many losses, late re-entry is bloc
 DAILY_LOSS_CUTOFF = dtime(13, 0) # after 13:00, stop re-entering if day already failed
 LATE_ENTRY_START = dtime(14, 15)
 LATE_ENTRY_MIN_FLOW = 12
+USE_EARLY_OI_ENTRY = False
+EARLY_ENTRY_START = dtime(9, 25)
+EARLY_ENTRY_MIN_FLOW = 16
+EARLY_ENTRY_MIN_SAME_SIDE = 3
+EARLY_ENTRY_MIN_OPP_SUPPORT = 2
+EARLY_ENTRY_MIN_PRICE_PCT = 6
+EARLY_ENTRY_MIN_VOLUME_PCT = 40
+EARLY_REQUIRE_CROSS_CONFIRM = True
+RELAX_SAME_SIDE_ON_CROSS_CONFIRM = True
+RELAXED_MIN_SAME_SIDE = 1
+RELAXED_MIN_OPP_SUPPORT = 2
 
 # Exit rule:
 # For CE/PE buy, exit when any 3 of Delta%, Gamma%, Volume%, Price% become negative.
@@ -442,6 +551,13 @@ def parse_month(value):
     if month < 1 or month > 12:
         raise ValueError("month must be 1-12 or month name like jan")
     return month
+
+def parse_time_arg(value):
+    try:
+        hour, minute = str(value).strip().split(":", 1)
+        return dtime(int(hour), int(minute))
+    except Exception as exc:
+        raise argparse.ArgumentTypeError(f"Invalid time '{value}'. Use HH:MM, e.g. 09:25") from exc
 
 def month_name(month):
     return pd.Timestamp(2000, month, 1).strftime("%B")
@@ -1042,6 +1158,42 @@ def get_flow_confirm(full, ts, strike, side):
     if tags:
         reason += " " + " ".join(tags)
     return flow_score, pe_buy, ce_sell, reason
+
+def has_cross_side_oi_confirm(side, flow_reason):
+    if side == "ce":
+        return "OI_BULL" in flow_reason
+    return "OI_BEAR" in flow_reason
+
+def early_oi_entry_ok(ts, side, pp, vp, flow_score, same_side_count, opp_side_count, flow_reason):
+    """
+    Optional 09:25-09:45 unlock for only the strongest OI buildup patterns.
+    This catches early CE_BUY + PE_SELL / PE_BUY + CE_SELL confirmation without
+    reopening weak gap-spike entries.
+    """
+    if not USE_EARLY_OI_ENTRY:
+        return False
+    if not (EARLY_ENTRY_START <= ts.time() < ENTRY_START):
+        return False
+    if EARLY_REQUIRE_CROSS_CONFIRM and not has_cross_side_oi_confirm(side, flow_reason):
+        return False
+    return (
+        flow_score >= EARLY_ENTRY_MIN_FLOW and
+        same_side_count >= EARLY_ENTRY_MIN_SAME_SIDE and
+        opp_side_count >= EARLY_ENTRY_MIN_OPP_SUPPORT and
+        pp >= EARLY_ENTRY_MIN_PRICE_PCT and
+        vp >= EARLY_ENTRY_MIN_VOLUME_PCT
+    )
+
+def same_side_entry_ok(side, same_side_count, opp_side_count, flow_reason):
+    if same_side_count >= MIN_SAME_SIDE_COUNT:
+        return True
+    if not RELAX_SAME_SIDE_ON_CROSS_CONFIRM:
+        return False
+    return (
+        same_side_count >= RELAXED_MIN_SAME_SIDE and
+        opp_side_count >= RELAXED_MIN_OPP_SUPPORT and
+        has_cross_side_oi_confirm(side, flow_reason)
+    )
 # ══════════════════════════════════════════════════════════════════════════════
 # CORE FUNCTIONS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1491,6 +1643,20 @@ def run_single_analysis(csv_path=None, analysis_date=None):
                 (sdf[f"{side}_d_rank"] >= STRENGTH_PCT) &
                 (sdf[f"{side}_g_rank"] >= STRENGTH_PCT)
             )
+            # Display-only OI buildup row:
+            # Big moves can start with option price + volume expansion before
+            # delta/gamma ranks become strong. Keep these candles visible in
+            # the OI buildup table for breakdowns like 2024-01-02 09:54-10:00.
+            sdf[f"{side}_price_volume_build"] = (
+                (sdf[f"{side}_p_pct"] >= OI_TABLE_PRICE_PCT) &
+                (sdf[f"{side}_v_pct"] >= OI_TABLE_VOLUME_PCT)
+            )
+            # Also keep the opposite-side weakness visible. During a PE move,
+            # CE rows often have price falling and should be shown as weakness
+            # context instead of disappearing from the table.
+            sdf[f"{side}_price_drop_weakness"] = (
+                sdf[f"{side}_p_pct"] <= OI_TABLE_PRICE_DROP_PCT
+            )
             sdf[f"{side}_cross_bull"] = (
                 (sdf[f"{side}_d_trend"] == 1) &
                 (sdf[f"{side}_g_trend"] == 1) &
@@ -1532,6 +1698,13 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     header("LAYER 1 — SAME-CANDLE SPIKE  (Delta ∧ Gamma both high simultaneously)", W)
     print(f"  {dim('Threshold: runtime percentile ≥')} {bold(str(STRENGTH_PCT))}th\n")
 
+    print(
+        f"  {dim('Also showing price-volume buildup rows: P% >=')} "
+        f"{bold(str(OI_TABLE_PRICE_PCT))}   {dim('V% >=')} "
+        f"{bold(str(OI_TABLE_VOLUME_PCT))}   "
+        f"{dim('and weakness rows: P% <=')} {bold(str(OI_TABLE_PRICE_DROP_PCT))}\n"
+    )
+
     h1 = (f"  {'TIMESTAMP':<19}  {'STRIKE':>8}  {'SPOT':>8}  {'SIDE':>4}  "
           f"{'SCORE':>5}  {'STRENGTH':>18}  "
           f"{'DELTA':>10} {'D CHG%':>9}  {'GAMMA':>10} {'G CHG%':>9}  "
@@ -1542,7 +1715,11 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     
     layer1_rows = []
     for side in sides:
-        sub = full[full[f"{side}_same_spike"]].copy()
+        sub = full[
+            full[f"{side}_same_spike"] |
+            full[f"{side}_price_volume_build"] |
+            full[f"{side}_price_drop_weakness"]
+        ].copy()
         for _, r in sub.iterrows():
             layer1_rows.append((r["timestamp"], r["strike"], r["spot"], side,
                                 r[f"{side}_score"],
@@ -1599,6 +1776,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     momentum_override_count = 0
     weak_momentum_override_reject = 0
     entry_start_reject = 0
+    early_entry_accept_count = 0
     low_flow_reject = 0
     low_same_side_reject = 0
     late_flow_reject = 0
@@ -1615,19 +1793,29 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             (full["strike"] == stk)
         ].iloc[0]
 
-        if ts.time() < ENTRY_START:
-            entry_start_reject += 1
-            continue
-
         if ts.time() >= ENTRY_CUTOFF:
             continue
 
         momentum_ok, momentum_reason = price_momentum_override(r, side, pp)
 
+        flow_score, same_side_count, opp_side_count, flow_reason = get_flow_confirm(
+            full, ts, stk, side
+        )
+        early_entry_ok = early_oi_entry_ok(
+            ts, side, pp, vp, flow_score, same_side_count, opp_side_count, flow_reason
+        )
+
+        if ts.time() < ENTRY_START and not early_entry_ok:
+            entry_start_reject += 1
+            continue
+
+        if early_entry_ok:
+            early_entry_accept_count += 1
+
         ma_ok, ma_reason = passes_nifty_200ma_filter(r, side)
         if ma_reason == "MA missing":
             ma_missing_count += 1
-        if not ma_ok and not momentum_ok:
+        if not ma_ok and not (momentum_ok or early_entry_ok):
             if side == "ce":
                 ce_ma_reject += 1
             else:
@@ -1647,7 +1835,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         chop_ok, chop_reason = passes_nifty_chop_filter(r)
         if chop_reason == "MA/chop missing":
             chop_missing_count += 1
-        if not chop_ok and not momentum_ok:
+        if not chop_ok and not (momentum_ok or early_entry_ok):
             chop_reject += 1
             continue
 
@@ -1666,15 +1854,11 @@ def run_single_analysis(csv_path=None, analysis_date=None):
                 pe_gamma_reject += 1
             continue
 
-        flow_score, same_side_count, opp_side_count, flow_reason = get_flow_confirm(
-            full, ts, stk, side
-        )
-
         # Price momentum can override 200MA/chop only when the option move is
         # supported by nearby strikes. This avoids one-candle P% spikes that
         # show high price momentum but later produce tiny BEST and deep BAD.
         momentum_override_used = momentum_ok and (not ma_ok or not chop_ok)
-        if STRICT_MOMENTUM_OVERRIDE_QUALITY and momentum_override_used:
+        if STRICT_MOMENTUM_OVERRIDE_QUALITY and momentum_override_used and not early_entry_ok:
             momentum_quality_ok = (
                 flow_score >= MOMENTUM_OVERRIDE_MIN_FLOW and
                 same_side_count >= MOMENTUM_OVERRIDE_MIN_SAME_SIDE and
@@ -1711,10 +1895,12 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         if not flow_ok:
             low_flow_reject += 1
 
-        if same_side_count < MIN_SAME_SIDE_COUNT:
+        same_side_ok = same_side_entry_ok(side, same_side_count, opp_side_count, flow_reason)
+
+        if not same_side_ok:
             low_same_side_reject += 1
 
-        if sum(strong_checks) >= 3 and same_side_count >= MIN_SAME_SIDE_COUNT:
+        if sum(strong_checks) >= 3 and same_side_ok:
 
             if side == "pe":
                 pe_pass += 1
@@ -1766,7 +1952,8 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             f"N50={int(float(r.get('nifty_close', np.nan)) >= float(r.get('ema50', np.nan)) if not pd.isna(r.get('nifty_close', np.nan)) and not pd.isna(r.get('ema50', np.nan)) else 0)} "
             f"COMP={int(bool(r.get('ma_compression', False)))} "
             f"X={int(r.get('ema20_50_crosses', 0))} "
-            f"{momentum_reason if momentum_ok else ''} {flow_reason}"
+            f"{momentum_reason if momentum_ok else ''} "
+            f"{'EARLY_OI' if early_entry_ok else ''} {flow_reason}"
             ))
         
         else:
@@ -1857,6 +2044,17 @@ def run_single_analysis(csv_path=None, analysis_date=None):
           f"{dim('Low flow blocked:')} {bold(str(low_flow_reject))}   "
           f"{dim('Low same-side blocked:')} {bold(str(low_same_side_reject))}   "
           f"{dim('Late low-flow blocked:')} {bold(str(late_flow_reject))}")
+    if USE_EARLY_OI_ENTRY:
+        print(f"  {dim('Early OI entry:')} {bold('ON')}   "
+              f"{dim('Window:')} {bold(EARLY_ENTRY_START.strftime('%H:%M') + '-' + ENTRY_START.strftime('%H:%M'))}   "
+              f"{dim('Flow >=')} {bold(str(EARLY_ENTRY_MIN_FLOW))}   "
+              f"{dim('Same/Opp >=')} {bold(str(EARLY_ENTRY_MIN_SAME_SIDE) + '/' + str(EARLY_ENTRY_MIN_OPP_SUPPORT))}   "
+              f"{dim('P% >=')} {bold(str(EARLY_ENTRY_MIN_PRICE_PCT))}   "
+              f"{dim('V% >=')} {bold(str(EARLY_ENTRY_MIN_VOLUME_PCT))}   "
+              f"{dim('Cross confirm:')} {bold('ON' if EARLY_REQUIRE_CROSS_CONFIRM else 'OFF')}   "
+              f"{dim('Accepted:')} {bold(str(early_entry_accept_count))}")
+    else:
+        print(f"  {dim('Early OI entry:')} {bold('OFF')}")
     if ALLOW_OVERLAPPING_TRADES:
         print(f"  {dim('Single active trade rule:')} {bold('OFF')}   "
               f"{dim('Overlapping entries allowed')}")
@@ -2040,7 +2238,74 @@ def parse_args():
                         help="Folder containing weekly oi_YYYY_MM_DD.csv files.")
     parser.add_argument("--no-next-week", action="store_true",
                         help="Monthly mode: do not include first 7 days of next month.")
+    parser.add_argument("--entry-start", type=parse_time_arg,
+                        help="Normal entry start time, HH:MM. Default from USER CONFIG: 09:45.")
+    parser.add_argument("--flow", "--min-flow", dest="min_flow", type=int,
+                        help="Minimum entry FLOW score. Default from USER CONFIG: 10.")
+    parser.add_argument("--same-side", "--min-same-side", dest="min_same_side", type=int,
+                        help="Minimum same-side confirming strikes. Default from USER CONFIG: 2.")
+    parser.add_argument("--late-start", type=parse_time_arg,
+                        help="Late-entry stricter flow start time, HH:MM. Default: 14:15.")
+    parser.add_argument("--late-flow", type=int,
+                        help="Minimum FLOW after --late-start. Default: 12.")
+    parser.add_argument("--early-entry", action="store_true",
+                        help="Enable 09:25-09:45 super-strong OI buildup entries.")
+    parser.add_argument("--early-start", type=parse_time_arg,
+                        help="Early OI entry start time, HH:MM. Default: 09:25.")
+    parser.add_argument("--early-flow", type=int,
+                        help="Minimum FLOW for early OI entries. Default: 16.")
+    parser.add_argument("--early-same-side", type=int,
+                        help="Minimum same-side strikes for early OI entries. Default: 3.")
+    parser.add_argument("--early-opp", type=int,
+                        help="Minimum opposite-side support strikes for early OI entries. Default: 2.")
+    parser.add_argument("--early-price-pct", type=float,
+                        help="Minimum option price %% for early OI entries. Default: 6.")
+    parser.add_argument("--early-volume-pct", type=float,
+                        help="Minimum option volume %% for early OI entries. Default: 40.")
+    parser.add_argument("--early-no-cross-confirm", action="store_true",
+                        help="Early entries can use strong same-side flow even without OI_BULL/OI_BEAR.")
+    parser.add_argument("--no-relax-cross-side", action="store_true",
+                        help="Disable relaxed same-side rule when OI_BULL/OI_BEAR has opposite-side support.")
     return parser.parse_args()
+
+def apply_arg_config(args):
+    global ENTRY_START, MIN_ENTRY_FLOW_SCORE, MIN_SAME_SIDE_COUNT
+    global LATE_ENTRY_START, LATE_ENTRY_MIN_FLOW
+    global USE_EARLY_OI_ENTRY, EARLY_ENTRY_START, EARLY_ENTRY_MIN_FLOW
+    global EARLY_ENTRY_MIN_SAME_SIDE, EARLY_ENTRY_MIN_OPP_SUPPORT
+    global EARLY_ENTRY_MIN_PRICE_PCT, EARLY_ENTRY_MIN_VOLUME_PCT
+    global EARLY_REQUIRE_CROSS_CONFIRM
+    global RELAX_SAME_SIDE_ON_CROSS_CONFIRM
+
+    if args.entry_start is not None:
+        ENTRY_START = args.entry_start
+    if args.min_flow is not None:
+        MIN_ENTRY_FLOW_SCORE = args.min_flow
+    if args.min_same_side is not None:
+        MIN_SAME_SIDE_COUNT = args.min_same_side
+    if args.late_start is not None:
+        LATE_ENTRY_START = args.late_start
+    if args.late_flow is not None:
+        LATE_ENTRY_MIN_FLOW = args.late_flow
+
+    if args.early_entry:
+        USE_EARLY_OI_ENTRY = True
+    if args.early_start is not None:
+        EARLY_ENTRY_START = args.early_start
+    if args.early_flow is not None:
+        EARLY_ENTRY_MIN_FLOW = args.early_flow
+    if args.early_same_side is not None:
+        EARLY_ENTRY_MIN_SAME_SIDE = args.early_same_side
+    if args.early_opp is not None:
+        EARLY_ENTRY_MIN_OPP_SUPPORT = args.early_opp
+    if args.early_price_pct is not None:
+        EARLY_ENTRY_MIN_PRICE_PCT = args.early_price_pct
+    if args.early_volume_pct is not None:
+        EARLY_ENTRY_MIN_VOLUME_PCT = args.early_volume_pct
+    if args.early_no_cross_confirm:
+        EARLY_REQUIRE_CROSS_CONFIRM = False
+    if args.no_relax_cross_side:
+        RELAX_SAME_SIDE_ON_CROSS_CONFIRM = False
 
 def print_compact_monthly_summary(results, month, year, start_date, end_date):
     header(f"MONTHLY SUMMARY - {month_name(month)} {year}", 112)
@@ -2150,6 +2415,7 @@ def main():
         return
 
     args = parse_args()
+    apply_arg_config(args)
     if args.monthly:
         run_monthly(args)
         return
