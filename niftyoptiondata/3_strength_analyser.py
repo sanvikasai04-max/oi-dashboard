@@ -1,4 +1,4 @@
-"""
+r"""
 Script 3: Options Flow Strength Analyser
 ═════════════════════════════════════════
 Reads oi_2026_06_15.csv and produces a multi-layer strength report:
@@ -14,7 +14,63 @@ All thresholds are computed at RUNTIME from the actual data (rolling percentile)
 All % changes shown for delta, gamma, volume, price.
 Data filtered to SESSION_START – SESSION_END window.
 
-Usage : python 3_strength_analyser.py
+RUN MODES / COMMANDS
+
+  1. DEFAULT FULL MODE
+     Command:
+       python 3_strength_analyser.py
+
+     What it does:
+       - Uses hardcoded CSV_PATH and ANALYSIS_DATE from USER CONFIG below.
+       - Prints the full OI buildup table from SESSION_START to SESSION_END.
+       - Prints top entries with entry/exit, PNL, best move PNL, best time,
+         delta %, gamma %, volume %, price %, and exit reason.
+       - Prints PE debug and final option trade summary.
+
+     Optional single-file argparse override:
+       python 3_strength_analyser.py --csv oi_2024_12_31.csv --date 2024-12-31
+
+     This still uses full mode output because --monthly is not passed.
+
+  2. COMPACT MONTHLY MODE
+     Command:
+       python 3_strength_analyser.py --monthly --month jan --year 2024
+
+     Month can be name or number:
+       python 3_strength_analyser.py --monthly --month january --year 2024
+       python 3_strength_analyser.py --monthly --month 1 --year 2024
+
+     If CSV files are in another folder:
+       python 3_strength_analyser.py --monthly --month jan --year 2024 --csv-dir C:\path\to\csvs
+
+     What it does:
+       - Scans weekly expiry CSVs named oi_YYYY_MM_DD.csv.
+       - Reads the timestamp column inside each CSV.
+       - Runs every actual trading date that falls in the selected month.
+       - If the same trading date appears in multiple weekly CSVs, the script
+         picks the nearest weekly expiry CSV for that date.
+       - Example: oi_2024_11_26.csv can run 2024-11-22 because that trading
+         date exists inside the CSV.
+       - Runs each matching trading date quietly.
+       - Does NOT print the OI buildup table.
+       - Prints only compact date-by-date summary:
+           CSV file, date, trades, profit count, loss count, flat count,
+           total PNL, and best move PNL.
+       - Prints every entry under that date with entry/exit, side, strike,
+         PNL, best move, Greeks/volume/price %, and exit reason.
+       - Prints one TOTAL row for the selected month.
+
+     Monthly expiry rule:
+       - Weekly expiry CSVs dated inside the selected month are included.
+       - By default, first 7 days of next month are also included because
+         weekly expiry can fall between month-end and the next month's first week.
+
+     To use only the selected calendar month and skip next month's first week:
+       python 3_strength_analyser.py --monthly --month jan --year 2024 --no-next-week
+
+  3. HELP
+     Command:
+       python 3_strength_analyser.py --help
 
 Exit logic added for better option-point capture:
 
@@ -62,8 +118,27 @@ Exit logic added for better option-point capture:
      When ALLOW_OVERLAPPING_TRADES = False, the script allows only one active
      option trade at a time. If one entry is already running, all new entry
      signals are skipped until the first trade exits.
+
+  5. Bad-move based stop loss
+     BAD MOVE shows the worst option-price move after entry.
+     If BEST MOVE is large but BAD MOVE is only slightly below the old stop,
+     the entry was good but the stop was too tight.
+
+     Stop logic:
+       - normal entries: 30 points
+       - price-momentum entries: 45 points
+       - super-strong price momentum + flow entries: 60 points
+
+     Super-strong means:
+       - PRICE_MOMENTUM entry
+       - FLOW >= SUPER_MOMENTUM_FLOW_SCORE
+       - same-side build >= SUPER_MOMENTUM_SIDE_COUNT
+       - opposite-side support >= SUPER_MOMENTUM_SIDE_COUNT
 """
 
+import argparse
+import contextlib
+import io
 import re
 import sys
 import pandas as pd
@@ -78,8 +153,8 @@ for _stream in (sys.stdout, sys.stderr):
 # ══════════════════════════════════════════════════════════════════════════════
 # USER CONFIG
 # ══════════════════════════════════════════════════════════════════════════════
-CSV_PATH         = "oi_2024_12_31.csv"
-ANALYSIS_DATE    = "2024-12-31"
+CSV_PATH         = "oi_2024_11_26.csv"
+ANALYSIS_DATE    = "2024-11-22"
 SIDE             = "both"          # "ce" | "pe" | "both"
 CROSS_CANDLES    = 5               # lookback window for cross-candle trend
 STRIKES_NEARBY   = 2
@@ -102,7 +177,11 @@ EXIT_NEG_COUNT = 3
 MIN_HOLD_BARS = 20          # don't exit immediately after entry
 EXIT_WEAK_BARS = 5          # need 3 continuous weak candles
 TRAIL_DROP_PTS = 40         # exit if option falls 25 pts from best price
-STOP_LOSS_PTS = 25          # fixed max loss from entry price
+STOP_LOSS_PTS = 30          # base fixed max loss from entry price
+MOMENTUM_STOP_LOSS_PTS = 45 # strong price-momentum entries need more room
+SUPER_MOMENTUM_STOP_LOSS_PTS = 60
+SUPER_MOMENTUM_FLOW_SCORE = 16
+SUPER_MOMENTUM_SIDE_COUNT = 4
 WEAK_EXIT_LOSS_PTS = 15     # weak exit only after this much loss, not while trade is green
 MOMENTUM_MIN_HOLD_BARS = 45 # strong price-momentum entries get more room to develop
 
@@ -193,6 +272,7 @@ CROSS_LOOKBACK = 20
 CROSS_COUNT_MIN = 3
 AVG_RANGE_LOOKBACK = 20
 AVG_RANGE_MAX = 10
+_NIFTY_200MA_CACHE = None
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ── ANSI ──────────────────────────────────────────────────────────────────────
@@ -254,9 +334,84 @@ def header(title, w=130):
     print(bold(f"  {title}"))
     print(bold("═" * w))
 
+def parse_month(value):
+    raw = str(value).strip().lower()
+    names = {
+        "jan": 1, "january": 1,
+        "feb": 2, "february": 2,
+        "mar": 3, "march": 3,
+        "apr": 4, "april": 4,
+        "may": 5,
+        "jun": 6, "june": 6,
+        "jul": 7, "july": 7,
+        "aug": 8, "august": 8,
+        "sep": 9, "sept": 9, "september": 9,
+        "oct": 10, "october": 10,
+        "nov": 11, "november": 11,
+        "dec": 12, "december": 12,
+    }
+    if raw in names:
+        return names[raw]
+    month = int(raw)
+    if month < 1 or month > 12:
+        raise ValueError("month must be 1-12 or month name like jan")
+    return month
+
+def month_name(month):
+    return pd.Timestamp(2000, month, 1).strftime("%B")
+
+def date_from_oi_filename(path):
+    match = re.search(r"oi_(\d{4})_(\d{2})_(\d{2})", Path(path).stem)
+    if not match:
+        return None
+    yyyy, mm, dd = match.groups()
+    return pd.Timestamp(int(yyyy), int(mm), int(dd)).date()
+
+def monthly_date_range(year, month, include_next_week=True):
+    start = pd.Timestamp(year, month, 1)
+    end = start + pd.offsets.MonthEnd(0)
+    if include_next_week:
+        end = end + pd.Timedelta(days=7)
+    return start.date(), end.date()
+
+def trading_dates_in_csv(csv_file):
+    try:
+        dates = pd.read_csv(csv_file, usecols=["timestamp"], parse_dates=["timestamp"])
+    except Exception:
+        file_date = date_from_oi_filename(csv_file)
+        return [file_date] if file_date else []
+
+    if dates.empty:
+        return []
+
+    return sorted(dates["timestamp"].dt.date.dropna().unique())
+
+def monthly_signal_date(csv_file):
+    file_date = date_from_oi_filename(csv_file)
+    dates = trading_dates_in_csv(csv_file)
+    if not dates:
+        return file_date
+    if not file_date:
+        return dates[-1]
+
+    before_expiry = [d for d in dates if d < file_date]
+    fridays = [d for d in before_expiry if pd.Timestamp(d).weekday() == 4]
+    if fridays:
+        return fridays[-1]
+    if before_expiry:
+        return before_expiry[-1]
+    if file_date in dates:
+        return file_date
+    return dates[-1]
+
 def load_nifty_200ma():
+    global _NIFTY_200MA_CACHE
+
     if not USE_NIFTY_200MA_FILTER:
         return None
+
+    if _NIFTY_200MA_CACHE is not None:
+        return _NIFTY_200MA_CACHE
 
     path = Path(NIFTY_1MIN_PATH)
     if not path.exists():
@@ -295,11 +450,12 @@ def load_nifty_200ma():
     chop_cols = ["flat200", "flat50", "flat20", "ma_compression", "many_crosses", "small_range"]
     nifty["chop_score"] = nifty[chop_cols].astype(int).sum(axis=1)
 
-    return nifty[[
+    _NIFTY_200MA_CACHE = nifty[[
         "timestamp", "nifty_close", "nifty_ma200", "ema20", "ema50",
         "flat200", "flat50", "flat20", "ma_compression", "many_crosses",
         "small_range", "ema20_50_crosses", "avg_range20", "chop_score",
     ]].dropna(subset=["nifty_ma200"])
+    return _NIFTY_200MA_CACHE
 
 def attach_nifty_200ma(full):
     nifty = load_nifty_200ma()
@@ -503,8 +659,49 @@ def dynamic_trailing_rule(best_move, live_score, momentum_entry):
         return 25, 20
     return 10, 15
 
-def find_exit_after_entry(full, entry_ts, strike, side, entry_price, col_map, momentum_entry=False):
+def adaptive_stop_loss_pts(momentum_entry=False, flow_score=0, same_side_count=0, opp_side_count=0):
+    """
+    Bad-move analysis showed that strong momentum entries can dip slightly
+    beyond the old fixed stop and then make the real move later.
+
+    Base entries use 30 pts.
+    Momentum entries use 45 pts.
+    Super-strong momentum flow uses 60 pts:
+      - price momentum entry
+      - FLOW >= SUPER_MOMENTUM_FLOW_SCORE
+      - same-side build and opposite-side support both strong
+    """
+    if not momentum_entry:
+        return STOP_LOSS_PTS
+
+    if (
+        flow_score >= SUPER_MOMENTUM_FLOW_SCORE and
+        same_side_count >= SUPER_MOMENTUM_SIDE_COUNT and
+        opp_side_count >= SUPER_MOMENTUM_SIDE_COUNT
+    ):
+        return SUPER_MOMENTUM_STOP_LOSS_PTS
+
+    return MOMENTUM_STOP_LOSS_PTS
+
+def find_exit_after_entry(
+    full,
+    entry_ts,
+    strike,
+    side,
+    entry_price,
+    col_map,
+    momentum_entry=False,
+    flow_score=0,
+    same_side_count=0,
+    opp_side_count=0,
+):
     cm = col_map[side]
+    stop_loss_pts = adaptive_stop_loss_pts(
+        momentum_entry=momentum_entry,
+        flow_score=flow_score,
+        same_side_count=same_side_count,
+        opp_side_count=opp_side_count,
+    )
 
     trade = full[
         (full["timestamp"] > entry_ts) &
@@ -533,9 +730,9 @@ def find_exit_after_entry(full, entry_ts, strike, side, entry_price, col_map, mo
         pnl_now = price - entry_price
         best_move = best_price - entry_price
 
-        if pnl_now <= -STOP_LOSS_PTS:
+        if pnl_now <= -stop_loss_pts:
             pnl = price - entry_price
-            return r["timestamp"], price, pnl, "Exit: stop loss"
+            return r["timestamp"], price, pnl, f"Exit: stop loss -{stop_loss_pts}"
 
         min_hold_bars = MOMENTUM_MIN_HOLD_BARS if momentum_entry else MIN_HOLD_BARS
 
@@ -618,6 +815,27 @@ def compute_strike_best_move(full, entry_ts, strike, side, entry_price, col_map)
 
     return round(best_move, 2), best_row["timestamp"], round(best_price, 2)
 
+def compute_strike_bad_move(full, entry_ts, strike, side, entry_price, col_map):
+    """
+    Bad move for the SAME STRIKE only.
+    Shows the maximum adverse option-price move after entry.
+    """
+    cm = col_map[side]
+    future = full[
+        (full["timestamp"] > entry_ts) &
+        (full["strike"] == strike)
+    ].copy().sort_values("timestamp")
+
+    if future.empty:
+        return 0.0, entry_ts, entry_price
+
+    low_idx = future[cm["price"]].astype(float).idxmin()
+    low_row = future.loc[low_idx]
+    low_price = float(low_row[cm["price"]])
+    bad_move = low_price - float(entry_price)
+
+    return round(bad_move, 2), low_row["timestamp"], round(low_price, 2)
+
 def get_flow_confirm(full, ts, strike, side):
     """
     Captures moves like 28/29 Oct:
@@ -668,7 +886,7 @@ def get_flow_confirm(full, ts, strike, side):
 # CORE FUNCTIONS
 # ══════════════════════════════════════════════════════════════════════════════
 def pct_change_col(series):
-    return (series.pct_change() * 100).round(2)
+    return (series.pct_change(fill_method=None) * 100).round(2)
 
 def rolling_pct_rank(series, window=20):
     return series.rolling(window, min_periods=1).apply(
@@ -995,26 +1213,40 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════════
-def main():
-    csv = Path(CSV_PATH)
-    if not csv.exists():
-        raise FileNotFoundError(f"CSV not found: {CSV_PATH}\nRun 1_db_to_csv.py first.")
+def run_single_analysis(csv_path=None, analysis_date=None):
+    csv_path = csv_path or CSV_PATH
+    analysis_date = analysis_date or ANALYSIS_DATE
 
-    print(bold(cyan(f"\n  Loading {CSV_PATH} …")))
-    df = pd.read_csv(CSV_PATH, parse_dates=["timestamp"])
+    csv = Path(csv_path)
+    if not csv.exists():
+        raise FileNotFoundError(f"CSV not found: {csv_path}\nRun 1_db_to_csv.py first.")
+
+    print(bold(cyan(f"\n  Loading {csv_path} …")))
+    df = pd.read_csv(csv, parse_dates=["timestamp"])
     print("CSV date range:", df["timestamp"].min(), "to", df["timestamp"].max())
 
 
     # Keep only selected date from the CSV
     # Keep only selected date from the CSV
-    df = df[df["timestamp"].dt.date == pd.to_datetime(ANALYSIS_DATE).date()].copy()
+    df = df[df["timestamp"].dt.date == pd.to_datetime(analysis_date).date()].copy()
     df.reset_index(drop=True, inplace=True)
 
     # Stop script clearly if selected date is not available in CSV
     if df.empty:
-        print(red(f"No rows found for ANALYSIS_DATE = {ANALYSIS_DATE}"))
+        print(red(f"No rows found for ANALYSIS_DATE = {analysis_date}"))
         print(yellow("Use one date from Available dates printed above."))
-        return
+        return {
+            "csv": Path(csv_path).name,
+            "date": str(analysis_date),
+            "trades": 0,
+            "profit_count": 0,
+            "loss_count": 0,
+            "flat_count": 0,
+            "total_pnl": 0.0,
+            "best_move_pnl": 0.0,
+            "bad_move_pnl": 0.0,
+            "trade_details": [],
+        }
 
     df.sort_values(["timestamp", "strike"], inplace=True)
     df.reset_index(drop=True, inplace=True)
@@ -1111,6 +1343,21 @@ def main():
             )
 
         records.append(sdf)
+
+    if not records:
+        print(yellow(f"No usable option rows after filters for ANALYSIS_DATE = {analysis_date}"))
+        return {
+            "csv": Path(csv_path).name,
+            "date": str(analysis_date),
+            "trades": 0,
+            "profit_count": 0,
+            "loss_count": 0,
+            "flat_count": 0,
+            "total_pnl": 0.0,
+            "best_move_pnl": 0.0,
+            "bad_move_pnl": 0.0,
+            "trade_details": [],
+        }
 
     full       = pd.concat(records, ignore_index=True).sort_values(["timestamp","strike"])
     full       = attach_nifty_200ma(full)
@@ -1288,7 +1535,16 @@ def main():
             entry_price = pv  # option buy price at entry candle
 
             exit_ts, exit_price, _, exit_reason = find_exit_after_entry(
-                full, ts, stk, side, entry_price, col_map, momentum_entry=momentum_ok
+                full,
+                ts,
+                stk,
+                side,
+                entry_price,
+                col_map,
+                momentum_entry=momentum_ok,
+                flow_score=flow_score,
+                same_side_count=same_side_count,
+                opp_side_count=opp_side_count,
             )
 
             entry_price = pv
@@ -1297,11 +1553,15 @@ def main():
             best_move, best_time, best_price = compute_strike_best_move(
                 full, ts, stk, side, entry_price, col_map
             )
+            bad_move, bad_time, bad_price = compute_strike_bad_move(
+                full, ts, stk, side, entry_price, col_map
+            )
 
             top_rows.append((
             ts, stk, spot, side,
             entry_price, exit_ts, exit_price, pnl_points,
             best_move, best_time, best_price,
+            bad_move, bad_time, bad_price,
             entry_score, score, dp, gp, vp, pp,
             exit_reason,
             f"{sum(strong_checks)}/4 FLOW={flow_score} CHOP={int(r.get('chop_score', 0))} "
@@ -1320,7 +1580,7 @@ def main():
                 pe_strength_reject += 1 
 
     # First sort by ENTRY SCORE so duplicate same-time signals keep the strongest row.
-    top_rows.sort(key=lambda x: x[11], reverse=True)
+    top_rows.sort(key=lambda x: x[14], reverse=True)
 
     # Remove duplicate timestamps: keep only strongest row from same timestamp.
     unique_rows = []
@@ -1391,24 +1651,25 @@ def main():
 
     h_top = (
         f"  {'ENTRY TIME':<19}  {'EXIT TIME':<19}  {'STRIKE':>8}  {'SPOT':>8}  {'SIDE':>4}  "
-        f"{'ENTRY':>8}  {'EXIT':>8}  {'PNL':>8}  {'BEST MOVE':>10}  {'BEST TIME':<19}  "
+        f"{'ENTRY':>8}  {'EXIT':>8}  {'PNL':>8}  {'BEST MOVE':>10}  {'BAD MOVE':>9}  {'BEST TIME':<19}  "
         f"{'ENTRY SCR':>9}  {'SYS SCR':>7}  "
         f"{'D%':>9}  {'G%':>9}  {'V%':>9}  {'P%':>9}  {'EXIT REASON':<28}"
     )
     print(bold(h_top))
     sep(W)
 
-    for ts, stk, spot, side, entry_price, exit_ts, exit_price, pnl_points, best_move, best_time, best_price, entry_score, sys_score, dp, gp, vp, pp, exit_reason, reason in unique_rows[:TOP_N]:
+    for ts, stk, spot, side, entry_price, exit_ts, exit_price, pnl_points, best_move, best_time, best_price, bad_move, bad_time, bad_price, entry_score, sys_score, dp, gp, vp, pp, exit_reason, reason in unique_rows[:TOP_N]:
         side_c = bright_green("CE") if side == "ce" else bright_red("PE")
 
         pnl_txt = bright_green(f"{pnl_points:>8.2f}") if pnl_points >= 0 else bright_red(f"{pnl_points:>8.2f}")
         best_txt = bright_green(f"{best_move:>10.2f}") if best_move >= 0 else bright_red(f"{best_move:>10.2f}")
+        bad_txt = bright_green(f"{bad_move:>9.2f}") if bad_move >= 0 else bright_red(f"{bad_move:>9.2f}")
 
         print(
             f"  {dim(str(ts)[:19])}  "
             f"{dim(str(exit_ts)[:19])}  "
             f"{cyan(f'{stk:>8.1f}')}  {cyan(f'{spot:>8.2f}')}  {side_c}  "
-            f"{entry_price:>8.2f}  {exit_price:>8.2f}  {pnl_txt}  {best_txt}  "
+            f"{entry_price:>8.2f}  {exit_price:>8.2f}  {pnl_txt}  {best_txt}  {bad_txt}  "
             f"{dim(str(best_time)[:19])}  "
             f"{bold(f'{entry_score:>9.1f}')}  {bold(f'{sys_score:>7.1f}')}  "
             f"{rjust(color_pct(dp), 9)}  "
@@ -1425,17 +1686,18 @@ def main():
         print(bold(h_top))
         sep(W)
 
-        for ts, stk, spot, side, entry_price, exit_ts, exit_price, pnl_points, best_move, best_time, best_price, entry_score, sys_score, dp, gp, vp, pp, exit_reason, reason in pe_rows[:TOP_N]:
+        for ts, stk, spot, side, entry_price, exit_ts, exit_price, pnl_points, best_move, best_time, best_price, bad_move, bad_time, bad_price, entry_score, sys_score, dp, gp, vp, pp, exit_reason, reason in pe_rows[:TOP_N]:
             side_c = bright_red("PE")
 
             pnl_txt = bright_green(f"{pnl_points:>8.2f}") if pnl_points >= 0 else bright_red(f"{pnl_points:>8.2f}")
             best_txt = bright_green(f"{best_move:>10.2f}") if best_move >= 0 else bright_red(f"{best_move:>10.2f}")
+            bad_txt = bright_green(f"{bad_move:>9.2f}") if bad_move >= 0 else bright_red(f"{bad_move:>9.2f}")
 
             print(
                 f"  {dim(str(ts)[:19])}  "
                 f"{dim(str(exit_ts)[:19])}  "
                 f"{cyan(f'{stk:>8.1f}')}  {cyan(f'{spot:>8.2f}')}  {side_c}  "
-                f"{entry_price:>8.2f}  {exit_price:>8.2f}  {pnl_txt}  {best_txt}  "
+                f"{entry_price:>8.2f}  {exit_price:>8.2f}  {pnl_txt}  {best_txt}  {bad_txt}  "
                 f"{dim(str(best_time)[:19])}  "
                 f"{bold(f'{entry_score:>9.1f}')}  {bold(f'{sys_score:>7.1f}')}  "
                 f"{rjust(color_pct(dp), 9)}  "
@@ -1502,6 +1764,180 @@ def main():
             cm["iv"],    f"{side}_score", f"{side}_same_spike",
             f"{side}_cross_bull", f"{side}_cross_bear",
         ]
+
+    trade_details = []
+    for r in unique_rows:
+        ts, stk, spot, side, entry_price, exit_ts, exit_price, pnl_points, best_move, best_time, best_price, bad_move, bad_time, bad_price, entry_score, sys_score, dp, gp, vp, pp, exit_reason, reason = r
+        trade_details.append({
+            "entry_time": str(ts)[:19],
+            "exit_time": str(exit_ts)[:19],
+            "side": side.upper(),
+            "strike": float(stk),
+            "entry": float(entry_price),
+            "exit": float(exit_price),
+            "pnl": float(pnl_points),
+            "best_move": float(best_move),
+            "best_time": str(best_time)[:19],
+            "bad_move": float(bad_move),
+            "bad_time": str(bad_time)[:19],
+            "entry_score": float(entry_score),
+            "sys_score": float(sys_score),
+            "d_pct": float(dp),
+            "g_pct": float(gp),
+            "v_pct": float(vp),
+            "p_pct": float(pp),
+            "exit_reason": str(exit_reason),
+        })
+
+    return {
+        "csv": Path(csv_path).name,
+        "date": str(analysis_date),
+        "trades": len(option_pnls),
+        "profit_count": profit_count,
+        "loss_count": loss_count,
+        "flat_count": flat_count,
+        "total_pnl": total_option_pnl,
+        "best_move_pnl": round(sum(float(r[8]) for r in unique_rows if r[8] is not None and not pd.isna(r[8])), 2),
+        "bad_move_pnl": round(sum(float(r[11]) for r in unique_rows if r[11] is not None and not pd.isna(r[11])), 2),
+        "trade_details": trade_details,
+    }
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Options flow strength analyser. No args keeps hardcoded CSV/date "
+            "full-output mode. --monthly enables compact date-by-date summary mode."
+        )
+    )
+    parser.add_argument("--csv", "--csv-path", dest="csv_path",
+                        help="Run one CSV file instead of hardcoded CSV_PATH.")
+    parser.add_argument("--date", "--analysis-date", dest="analysis_date",
+                        help="Run one date instead of hardcoded ANALYSIS_DATE.")
+    parser.add_argument("--monthly", action="store_true",
+                        help="Compact mode: run weekly expiry CSVs for a selected month/year.")
+    parser.add_argument("--month",
+                        help="Month name or number for --monthly, e.g. jan, january, 1.")
+    parser.add_argument("--year", type=int,
+                        help="Year for --monthly, e.g. 2024.")
+    parser.add_argument("--csv-dir", default=str(Path(__file__).resolve().parent),
+                        help="Folder containing weekly oi_YYYY_MM_DD.csv files.")
+    parser.add_argument("--no-next-week", action="store_true",
+                        help="Monthly mode: do not include first 7 days of next month.")
+    return parser.parse_args()
+
+def print_compact_monthly_summary(results, month, year, start_date, end_date):
+    header(f"MONTHLY SUMMARY - {month_name(month)} {year}", 112)
+    print(f"  Date range: {start_date} to {end_date}")
+    print(f"  {'CSV FILE':<20} {'DATE':<10} {'TRADES':>6} {'PROFIT':>6} {'LOSS':>6} {'FLAT':>5} {'PNL':>10} {'BEST MOVE':>10} {'BAD MOVE':>10}")
+    sep(112)
+
+    total_trades = 0
+    total_profit = 0
+    total_loss = 0
+    total_flat = 0
+    total_pnl = 0.0
+    total_best = 0.0
+    total_bad = 0.0
+
+    for r in results:
+        pnl_txt = bright_green(f"{r['total_pnl']:>10.2f}") if r["total_pnl"] >= 0 else bright_red(f"{r['total_pnl']:>10.2f}")
+        best_txt = bright_green(f"{r['best_move_pnl']:>10.2f}") if r["best_move_pnl"] >= 0 else bright_red(f"{r['best_move_pnl']:>10.2f}")
+        bad_txt = bright_green(f"{r['bad_move_pnl']:>10.2f}") if r["bad_move_pnl"] >= 0 else bright_red(f"{r['bad_move_pnl']:>10.2f}")
+        print(f"  {r['csv']:<20} {r['date']:<10} {r['trades']:>6} {r['profit_count']:>6} "
+              f"{r['loss_count']:>6} {r['flat_count']:>5} {pnl_txt} {best_txt} {bad_txt}")
+
+        if r.get("trade_details"):
+            print(f"    {'ENTRY TIME':<19} {'EXIT TIME':<19} {'SIDE':<4} {'STRIKE':>8} "
+                  f"{'ENTRY':>8} {'EXIT':>8} {'PNL':>9} {'BEST':>9} {'BAD':>9} {'BEST TIME':<19} "
+                  f"{'D%':>8} {'G%':>8} {'V%':>8} {'P%':>8}  EXIT REASON")
+            for t in r["trade_details"]:
+                trade_pnl = bright_green(f"{t['pnl']:>9.2f}") if t["pnl"] >= 0 else bright_red(f"{t['pnl']:>9.2f}")
+                trade_best = bright_green(f"{t['best_move']:>9.2f}") if t["best_move"] >= 0 else bright_red(f"{t['best_move']:>9.2f}")
+                trade_bad = bright_green(f"{t['bad_move']:>9.2f}") if t["bad_move"] >= 0 else bright_red(f"{t['bad_move']:>9.2f}")
+                print(f"    {t['entry_time']:<19} {t['exit_time']:<19} {t['side']:<4} "
+                      f"{t['strike']:>8.1f} {t['entry']:>8.2f} {t['exit']:>8.2f} "
+                      f"{trade_pnl} {trade_best} {trade_bad} {t['best_time']:<19} "
+                      f"{t['d_pct']:>7.2f}% {t['g_pct']:>7.2f}% {t['v_pct']:>7.2f}% "
+                      f"{t['p_pct']:>7.2f}%  {t['exit_reason']}")
+            print()
+
+        total_trades += r["trades"]
+        total_profit += r["profit_count"]
+        total_loss += r["loss_count"]
+        total_flat += r["flat_count"]
+        total_pnl += r["total_pnl"]
+        total_best += r["best_move_pnl"]
+        total_bad += r["bad_move_pnl"]
+
+    sep(112)
+    total_pnl_txt = bright_green(f"{total_pnl:>10.2f}") if total_pnl >= 0 else bright_red(f"{total_pnl:>10.2f}")
+    total_best_txt = bright_green(f"{total_best:>10.2f}") if total_best >= 0 else bright_red(f"{total_best:>10.2f}")
+    total_bad_txt = bright_green(f"{total_bad:>10.2f}") if total_bad >= 0 else bright_red(f"{total_bad:>10.2f}")
+    print(f"  {'TOTAL':<20} {'':<10} {total_trades:>6} {total_profit:>6} {total_loss:>6} "
+          f"{total_flat:>5} {total_pnl_txt} {total_best_txt} {total_bad_txt}")
+    print()
+
+def run_monthly(args):
+    if not args.month or not args.year:
+        raise SystemExit("--monthly needs both --month and --year")
+
+    month = parse_month(args.month)
+    start_date, end_date = monthly_date_range(
+        args.year,
+        month,
+        include_next_week=not args.no_next_week,
+    )
+
+    csv_dir = Path(args.csv_dir)
+    date_to_csv = {}
+    for csv_file in sorted(csv_dir.glob("oi_*.csv")):
+        file_date = date_from_oi_filename(csv_file)
+        if not file_date:
+            continue
+
+        # A month-end trading date can live inside the next weekly expiry CSV.
+        # Scan one extra week of expiry files, but only keep trading dates that
+        # are inside the requested monthly date range.
+        if file_date < start_date or file_date > (pd.Timestamp(end_date) + pd.Timedelta(days=7)).date():
+            continue
+
+        for trade_date in trading_dates_in_csv(csv_file):
+            if not (start_date <= trade_date <= end_date):
+                continue
+            current = date_to_csv.get(trade_date)
+            if current is None:
+                date_to_csv[trade_date] = (csv_file, file_date)
+                continue
+            _, current_file_date = current
+            if file_date >= trade_date and (current_file_date < trade_date or file_date < current_file_date):
+                date_to_csv[trade_date] = (csv_file, file_date)
+
+    csv_files = [(csv_file, trade_date) for trade_date, (csv_file, _) in sorted(date_to_csv.items())]
+
+    if not csv_files:
+        print(red(f"No trading dates found in {csv_dir} for {start_date} to {end_date}"))
+        return []
+
+    results = []
+    for csv_file, trade_date in csv_files:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            result = run_single_analysis(str(csv_file), str(trade_date))
+        results.append(result)
+
+    print_compact_monthly_summary(results, month, args.year, start_date, end_date)
+    return results
+
+def main():
+    if len(sys.argv) == 1:
+        run_single_analysis()
+        return
+
+    args = parse_args()
+    if args.monthly:
+        run_monthly(args)
+        return
+
+    run_single_analysis(args.csv_path or CSV_PATH, args.analysis_date or ANALYSIS_DATE)
 
 
 if __name__ == "__main__":
