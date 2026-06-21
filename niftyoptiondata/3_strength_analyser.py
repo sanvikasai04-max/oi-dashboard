@@ -149,6 +149,43 @@ Exit logic added for better option-point capture:
      Example:
        CE entry needs CE_BUY plus PE_SELL support.
        PE entry needs PE_BUY plus CE_SELL support.
+
+  7. Entry-quality hard filters
+     These filters target the biggest bad-move patterns from the monthly logs:
+
+       - ENTRY_START = 09:45
+         Blocks gap-open option spikes. Before 09:45, option price often jumps
+         at the top of the opening move and then mean-reverts.
+
+       - MIN_ENTRY_FLOW_SCORE = 10
+         Requires stronger nearby-strike confirmation before entry.
+
+       - MIN_SAME_SIDE_COUNT = 2
+         One nearby strike can be noise. Two same-side strikes is better flow.
+
+       - DAILY_LOSS_LIMIT = 2 with DAILY_LOSS_CUTOFF = 13:00
+         If two accepted trades are already losses, skip new entries after 13:00.
+         This avoids repeated chop re-entries late in the day.
+
+       - LATE_ENTRY_START = 14:15 and LATE_ENTRY_MIN_FLOW = 12
+         Late trades need stronger confirmation because there is less time for
+         the move to develop before the 3 PM force exit.
+
+  8. Cross-side OI buildup confirmation
+     This catches the strong entry pattern seen in the shared OI buildup logs:
+
+       Bullish CE entry:
+         - CE nearby strikes: delta up, volume up, option price up.
+         - PE nearby strikes: delta weakening, volume up, option price down.
+         - If both sides confirm across enough strikes, reason shows OI_BULL.
+
+       Bearish PE entry:
+         - PE nearby strikes: volume up and option price up.
+         - CE nearby strikes: delta weakening, volume up, option price down.
+         - If both sides confirm across enough strikes, reason shows OI_BEAR.
+
+     Gamma is used as a bonus, not a hard requirement, because option gamma can
+     rise on both sides during fast moves.
 """
 
 import argparse
@@ -168,8 +205,8 @@ for _stream in (sys.stdout, sys.stderr):
 # ══════════════════════════════════════════════════════════════════════════════
 # USER CONFIG
 # ══════════════════════════════════════════════════════════════════════════════
-CSV_PATH         = "oi_2024_11_26.csv"
-ANALYSIS_DATE    = "2024-11-22"
+CSV_PATH         = "oi_2024_01_02.csv"
+ANALYSIS_DATE    = "2024-01-02"
 SIDE             = "both"          # "ce" | "pe" | "both"
 CROSS_CANDLES    = 5               # lookback window for cross-candle trend
 STRIKES_NEARBY   = 2
@@ -184,6 +221,15 @@ OUT_CSV          = "strength_report.csv"
 OUT_XLSX         = "strength_report.xlsx"
 TOP_N = 20
 ALLOW_OVERLAPPING_TRADES = False  # False = one active trade only; next entry after exit
+
+# Entry-quality filters from monthly bad-move review.
+ENTRY_START = dtime(9, 45)       # avoid gap-open option spikes before 09:45
+MIN_ENTRY_FLOW_SCORE = 10        # was 6; require stronger cross-strike flow
+MIN_SAME_SIDE_COUNT = 2          # was 1; avoid single-strike noise entries
+DAILY_LOSS_LIMIT = 2             # after this many losses, late re-entry is blocked
+DAILY_LOSS_CUTOFF = dtime(13, 0) # after 13:00, stop re-entering if day already failed
+LATE_ENTRY_START = dtime(14, 15)
+LATE_ENTRY_MIN_FLOW = 12
 
 # Exit rule:
 # For CE/PE buy, exit when any 3 of Delta%, Gamma%, Volume%, Price% become negative.
@@ -209,10 +255,10 @@ TRAIL_LOCK_PTS     = 30     # after activation, protect 20 pts profit
 # Format: (best_move_trigger, minimum_locked_profit, max_drop_from_best_price)
 # Example: best +70 -> lock at least +45 and trail by 25 from the best price.
 PROFIT_TRAIL_TIERS = [
-    (100, 75, 25),
-    (70, 45, 25),
-    (40, 25, 20),
-    (25, 10, 15),
+    (100, 78, 25),
+    (70, 48, 25),
+    (40, 28, 22),
+    (25,  18, 18),
 ]
 
 # Price-momentum entries get wider trailing so fast CE/PE expansion is not
@@ -260,6 +306,25 @@ MOMENTUM_OVERRIDE_MIN_SAME_SIDE = 3
 MOMENTUM_OVERRIDE_MIN_OPP_SUPPORT = 2
 MOMENTUM_OVERRIDE_EMA20_SLOPE_MIN = 3
 MOMENTUM_OVERRIDE_EMA50_SLOPE_MIN = 2
+
+# Cross-side OI buildup confirmation:
+# Bullish setup = CE buying across nearby strikes + PE selling confirmation.
+# Bearish setup = PE buying across nearby strikes + CE selling confirmation.
+# This is based on the daily OI buildup examples:
+#   CE: delta up, volume up, price up.
+#   PE opposite: delta weakens, volume up, price down.
+# Gamma is a score bonus only, because gamma can expand on both sides.
+OI_BUILD_MIN_BUY_D_PCT = 6
+OI_BUILD_MIN_BUY_G_PCT = 2
+OI_BUILD_MIN_BUY_V_PCT = 40
+OI_BUILD_MIN_BUY_P_PCT = 8
+OI_BUILD_MIN_SELL_D_DROP_PCT = 3
+OI_BUILD_MIN_SELL_V_PCT = 40
+OI_BUILD_MIN_SELL_P_DROP_PCT = 5
+OI_BUILD_MIN_BUY_STRIKES = 2
+OI_BUILD_MIN_SELL_STRIKES = 2
+OI_BUILD_STRONG_BONUS = 4
+OI_BUILD_GAMMA_BONUS_PER_STRIKE = 1
 
 # NIFTY 200 MA trend filter:
 #   If NIFTY close is below 200 MA -> block CE entries.
@@ -879,10 +944,18 @@ def compute_strike_bad_move(full, entry_ts, strike, side, entry_price, col_map):
 
 def get_flow_confirm(full, ts, strike, side):
     """
-    Captures moves like 28/29 Oct:
-    CE price+volume buying + PE price down with volume up = bullish confirmation.
-    PE price+volume buying + CE price down with volume up = bearish confirmation.
-    Gamma is kept low weight because both sides gamma can rise.
+    Cross-side OI buildup confirmation.
+
+    Bullish:
+      CE nearby strikes show delta + volume + price expansion.
+      PE nearby strikes show weakening delta + volume build + price fall.
+
+    Bearish:
+      PE nearby strikes show volume + price expansion.
+      CE nearby strikes show weakening delta + volume build + price fall.
+
+    Gamma gives a bonus only; it is not required because gamma can rise on both
+    CE and PE during fast option repricing.
     """
     nearby = full[
         (full["timestamp"] == ts) &
@@ -897,31 +970,77 @@ def get_flow_confirm(full, ts, strike, side):
     pe_sell = 0
     pe_buy = 0
     ce_sell = 0
+    ce_gamma_bonus = 0
+    pe_gamma_bonus = 0
 
     for _, r in nearby.iterrows():
-        # CE buying strength
-        if r["ce_d_pct"] > 3 and r["ce_v_pct"] > 30 and r["ce_p_pct"] > 1:
-            ce_buy += 1
+        ce_buying = (
+            r["ce_d_pct"] >= OI_BUILD_MIN_BUY_D_PCT and
+            r["ce_v_pct"] >= OI_BUILD_MIN_BUY_V_PCT and
+            r["ce_p_pct"] >= OI_BUILD_MIN_BUY_P_PCT
+        )
+        pe_selling = (
+            r["pe_d_pct"] <= -OI_BUILD_MIN_SELL_D_DROP_PCT and
+            r["pe_v_pct"] >= OI_BUILD_MIN_SELL_V_PCT and
+            r["pe_p_pct"] <= -OI_BUILD_MIN_SELL_P_DROP_PCT
+        )
+        pe_buying = (
+            r["pe_v_pct"] >= OI_BUILD_MIN_BUY_V_PCT and
+            r["pe_p_pct"] >= OI_BUILD_MIN_BUY_P_PCT
+        )
+        ce_selling = (
+            r["ce_d_pct"] <= -OI_BUILD_MIN_SELL_D_DROP_PCT and
+            r["ce_v_pct"] >= OI_BUILD_MIN_SELL_V_PCT and
+            r["ce_p_pct"] <= -OI_BUILD_MIN_SELL_P_DROP_PCT
+        )
 
-        # PE selling / bullish opposite confirmation
-        if r["pe_d_pct"] < 0 and r["pe_v_pct"] > 30 and r["pe_p_pct"] < -1:
+        if ce_buying:
+            ce_buy += 1
+            if r["ce_g_pct"] >= OI_BUILD_MIN_BUY_G_PCT:
+                ce_gamma_bonus += OI_BUILD_GAMMA_BONUS_PER_STRIKE
+
+        if pe_selling:
             pe_sell += 1
 
-        # PE buying strength
-        if r["pe_d_pct"] > 3 and r["pe_v_pct"] > 30 and r["pe_p_pct"] > 1:
+        if pe_buying:
             pe_buy += 1
+            if r["pe_g_pct"] >= OI_BUILD_MIN_BUY_G_PCT:
+                pe_gamma_bonus += OI_BUILD_GAMMA_BONUS_PER_STRIKE
 
-        # CE selling / bearish opposite confirmation
-        if r["ce_d_pct"] < 0 and r["ce_v_pct"] > 30 and r["ce_p_pct"] < -1:
+        if ce_selling:
             ce_sell += 1
 
     if side == "ce":
-        flow_score = ce_buy * 2 + pe_sell * 2
+        strong_cross_side = (
+            ce_buy >= OI_BUILD_MIN_BUY_STRIKES and
+            pe_sell >= OI_BUILD_MIN_SELL_STRIKES
+        )
+        flow_score = ce_buy * 2 + pe_sell * 2 + ce_gamma_bonus
+        tags = []
+        if strong_cross_side:
+            flow_score += OI_BUILD_STRONG_BONUS
+            tags.append("OI_BULL")
+        if ce_gamma_bonus:
+            tags.append(f"CE_GBONUS={ce_gamma_bonus}")
         reason = f"CE_BUY={ce_buy} PE_SELL={pe_sell}"
+        if tags:
+            reason += " " + " ".join(tags)
         return flow_score, ce_buy, pe_sell, reason
 
-    flow_score = pe_buy * 2 + ce_sell * 2
+    strong_cross_side = (
+        pe_buy >= OI_BUILD_MIN_BUY_STRIKES and
+        ce_sell >= OI_BUILD_MIN_SELL_STRIKES
+    )
+    flow_score = pe_buy * 2 + ce_sell * 2 + pe_gamma_bonus
+    tags = []
+    if strong_cross_side:
+        flow_score += OI_BUILD_STRONG_BONUS
+        tags.append("OI_BEAR")
+    if pe_gamma_bonus:
+        tags.append(f"PE_GBONUS={pe_gamma_bonus}")
     reason = f"PE_BUY={pe_buy} CE_SELL={ce_sell}"
+    if tags:
+        reason += " " + " ".join(tags)
     return flow_score, pe_buy, ce_sell, reason
 # ══════════════════════════════════════════════════════════════════════════════
 # CORE FUNCTIONS
@@ -1479,6 +1598,10 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     chop_missing_count = 0
     momentum_override_count = 0
     weak_momentum_override_reject = 0
+    entry_start_reject = 0
+    low_flow_reject = 0
+    low_same_side_reject = 0
+    late_flow_reject = 0
     top_rows = []
 
     for row in layer1_rows:
@@ -1491,6 +1614,10 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             (full["timestamp"] == ts) &
             (full["strike"] == stk)
         ].iloc[0]
+
+        if ts.time() < ENTRY_START:
+            entry_start_reject += 1
+            continue
 
         if ts.time() >= ENTRY_CUTOFF:
             continue
@@ -1565,7 +1692,11 @@ def run_single_analysis(csv_path=None, analysis_date=None):
 
         price_ok = pp > 1
         volume_ok = vp > 30
-        flow_ok = flow_score >= 6
+        flow_ok = flow_score >= MIN_ENTRY_FLOW_SCORE
+
+        if ts.time() >= LATE_ENTRY_START and flow_score < LATE_ENTRY_MIN_FLOW:
+            late_flow_reject += 1
+            continue
 
         strong_checks = [
             delta_ok,
@@ -1577,7 +1708,13 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         if side == "pe" and not flow_ok:
             pe_flow_reject += 1
 
-        if sum(strong_checks) >= 3 and same_side_count >= 1:
+        if not flow_ok:
+            low_flow_reject += 1
+
+        if same_side_count < MIN_SAME_SIDE_COUNT:
+            low_same_side_reject += 1
+
+        if sum(strong_checks) >= 3 and same_side_count >= MIN_SAME_SIDE_COUNT:
 
             if side == "pe":
                 pe_pass += 1
@@ -1653,21 +1790,34 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     # Print entries in proper time order, not score order.
     unique_rows.sort(key=lambda x: x[0])
     overlapping_skip_count = 0
+    daily_loss_reentry_skip_count = 0
 
     if not ALLOW_OVERLAPPING_TRADES:
         single_trade_rows = []
         active_until = None
+        daily_loss_count = {}
 
         for r in unique_rows:
             entry_ts = r[0]
             exit_ts = r[5]
+            pnl_points = r[7]
+            trade_day = entry_ts.date()
 
             if active_until is not None and entry_ts < active_until:
                 overlapping_skip_count += 1
                 continue
 
+            if (
+                daily_loss_count.get(trade_day, 0) >= DAILY_LOSS_LIMIT and
+                entry_ts.time() >= DAILY_LOSS_CUTOFF
+            ):
+                daily_loss_reentry_skip_count += 1
+                continue
+
             single_trade_rows.append(r)
             active_until = exit_ts if exit_ts is not None and not pd.isna(exit_ts) else entry_ts
+            if pnl_points is not None and not pd.isna(pnl_points) and float(pnl_points) < 0:
+                daily_loss_count[trade_day] = daily_loss_count.get(trade_day, 0) + 1
 
         unique_rows = single_trade_rows
 
@@ -1699,12 +1849,21 @@ def run_single_analysis(csv_path=None, analysis_date=None):
               f"{dim('Weak overrides blocked:')} {bold(str(weak_momentum_override_reject))}")
     else:
         print(f"  {dim('Price momentum override:')} {bold('OFF')}")
+    print(f"  {dim('Entry quality filters:')} {bold('ON')}   "
+          f"{dim('Start >=')} {bold(ENTRY_START.strftime('%H:%M'))}   "
+          f"{dim('Flow >=')} {bold(str(MIN_ENTRY_FLOW_SCORE))}   "
+          f"{dim('Same-side >=')} {bold(str(MIN_SAME_SIDE_COUNT))}   "
+          f"{dim('Open blocked:')} {bold(str(entry_start_reject))}   "
+          f"{dim('Low flow blocked:')} {bold(str(low_flow_reject))}   "
+          f"{dim('Low same-side blocked:')} {bold(str(low_same_side_reject))}   "
+          f"{dim('Late low-flow blocked:')} {bold(str(late_flow_reject))}")
     if ALLOW_OVERLAPPING_TRADES:
         print(f"  {dim('Single active trade rule:')} {bold('OFF')}   "
               f"{dim('Overlapping entries allowed')}")
     else:
         print(f"  {dim('Single active trade rule:')} {bold('ON')}   "
-              f"{dim('Overlapping entries skipped:')} {bold(str(overlapping_skip_count))}")
+              f"{dim('Overlapping entries skipped:')} {bold(str(overlapping_skip_count))}   "
+              f"{dim('Daily loss re-entry skipped:')} {bold(str(daily_loss_reentry_skip_count))}")
     print()
 
     h_top = (
