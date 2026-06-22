@@ -301,7 +301,7 @@ for _stream in (sys.stdout, sys.stderr):
 # USER CONFIG
 # ══════════════════════════════════════════════════════════════════════════════
 CSV_PATH         = "oi_2024_01_02.csv"
-ANALYSIS_DATE    = "2024-01-02"
+ANALYSIS_DATE    = "2024-01-01"
 SIDE             = "both"          # "ce" | "pe" | "both"
 CROSS_CANDLES    = 5               # lookback window for cross-candle trend
 STRIKES_NEARBY   = 2
@@ -1695,8 +1695,8 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     # ══════════════════════════════════════════════════════════════════════════
     # LAYER 1 — SAME-CANDLE SPIKE REPORT
     # ══════════════════════════════════════════════════════════════════════════
-    header("LAYER 1 — SAME-CANDLE SPIKE  (Delta ∧ Gamma both high simultaneously)", W)
-    print(f"  {dim('Threshold: runtime percentile ≥')} {bold(str(STRENGTH_PCT))}th\n")
+    header("SNAPSHOT OI BUILDUP — every timestamp, CE first then PE", W)
+    print(f"  {dim('Layer 1 threshold: runtime percentile ≥')} {bold(str(STRENGTH_PCT))}th\n")
 
     print(
         f"  {dim('Also showing price-volume buildup rows: P% >=')} "
@@ -1713,8 +1713,18 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     sep(W)
     
     
+    snapshot_rows = []
     layer1_rows = []
     for side in sides:
+        for _, r in full.iterrows():
+            snapshot_rows.append((r["timestamp"], r["strike"], r["spot"], side,
+                                  r[f"{side}_score"],
+                                  r[col_map[side]["delta"]], r[f"{side}_d_pct"],
+                                  r[col_map[side]["gamma"]], r[f"{side}_g_pct"],
+                                  r[col_map[side]["volume"]],r[f"{side}_v_pct"],
+                                  r[col_map[side]["price"]], r[f"{side}_p_pct"],
+                                  r[col_map[side]["iv"]]))
+
         sub = full[
             full[f"{side}_same_spike"] |
             full[f"{side}_price_volume_build"] |
@@ -1730,9 +1740,15 @@ def run_single_analysis(csv_path=None, analysis_date=None):
                                 r[col_map[side]["iv"]]))
 
     # Same timestamp → all CE first → all PE next
+    snapshot_rows.sort(key=lambda x: (x[0], 0 if x[3] == "ce" else 1, x[1]))
     layer1_rows.sort(key=lambda x: (x[0], 0 if x[3] == "ce" else 1, x[1]))
 
-    for ts, stk, spot, side, score, dv, dp, gv, gp, vv, vp, pv, pp, iv in layer1_rows:
+    prev_snapshot_ts = None
+    for ts, stk, spot, side, score, dv, dp, gv, gp, vv, vp, pv, pp, iv in snapshot_rows:
+        if prev_snapshot_ts is not None and ts != prev_snapshot_ts:
+            print()
+        prev_snapshot_ts = ts
+
         sc     = f"{score:5.1f}"
         bar    = strength_bar(score)
         lbl    = strength_label(score)
@@ -1750,8 +1766,8 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             f"{dim(f'{iv:>7.2f}%')}"
         )
 
-    if not layer1_rows:
-        print(f"  {dim('No same-candle spikes found.')}")
+    if not snapshot_rows:
+        print(f"  {dim('No snapshot rows found.')}")
     sep(W)
 
     # TOP ENTRIES TABLE — best entry candles from Layer 1 data
