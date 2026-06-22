@@ -356,7 +356,7 @@ WEAK_EXIT_LOSS_PTS = 15     # weak exit only after this much loss, not while tra
 MOMENTUM_MIN_HOLD_BARS = 45 # strong price-momentum entries get more room to develop
 
 ENTRY_CUTOFF = dtime(15, 0)   # no new entries after 3 PM
-FORCE_EXIT   = dtime(15, 0)   # force exit at/after 3 PM
+FORCE_EXIT   = dtime(15, 25)  # force exit near market close, after late moves can mature
 TRAIL_ACTIVATE_PTS = 40     # trailing starts only after +30 pts profit
 TRAIL_LOCK_PTS     = 30     # after activation, protect 20 pts profit
 
@@ -836,17 +836,23 @@ def live_exit_strength_score(full, row, strike, side):
     reason = f"LIVE={score} SAME={same_build} OPP_SUPPORT={opp_support} OPP_BUILD={opposite_build}"
     return score, reason
 
-def dynamic_trailing_rule(best_move, live_score, momentum_entry):
+def dynamic_trailing_rule(best_move, live_score, momentum_entry, analysis_entry=False):
     if best_move < 25:
         return None
+
+    protected_entry = momentum_entry or analysis_entry
 
     # Momentum entries need room. Do not start trailing them on small profit
     # unless the live score is strongly positive. This avoids booking 8-10 pts
     # before the later OI/price build creates the real move.
-    if momentum_entry and best_move < 70 and live_score < STRONG_EXIT_SCORE:
+    if protected_entry and best_move < 40:
+        return None
+    if protected_entry and best_move < 70 and live_score < STRONG_EXIT_SCORE:
         return None
 
     if live_score >= STRONG_EXIT_SCORE:
+        if protected_entry and best_move < 70:
+            return None
         if best_move >= 100:
             return 75, 40
         if best_move >= 70:
@@ -864,7 +870,7 @@ def dynamic_trailing_rule(best_move, live_score, momentum_entry):
             return 25, 20
         return 10, 15
 
-    if momentum_entry:
+    if protected_entry:
         if best_move >= 100:
             return 75, 30
         if best_move >= 70:
@@ -913,6 +919,7 @@ def find_exit_after_entry(
     entry_price,
     col_map,
     momentum_entry=False,
+    analysis_entry=False,
     flow_score=0,
     same_side_count=0,
     opp_side_count=0,
@@ -925,6 +932,8 @@ def find_exit_after_entry(
         same_side_count=same_side_count,
         opp_side_count=opp_side_count,
     )
+    if analysis_entry:
+        stop_loss_pts = max(stop_loss_pts, MOMENTUM_STOP_LOSS_PTS)
 
     trade = full[
         (full["timestamp"] > entry_ts) &
@@ -945,7 +954,7 @@ def find_exit_after_entry(
         # Force exit at 3 PM
         if r["timestamp"].time() >= FORCE_EXIT:
             pnl = price - entry_price
-            return r["timestamp"], price, pnl, "Exit: 3 PM force exit"
+            return r["timestamp"], price, pnl, f"Exit: force exit {FORCE_EXIT.strftime('%H:%M')}"
         
         price = r[cm["price"]]
         best_price = max(best_price, price)
@@ -963,7 +972,8 @@ def find_exit_after_entry(
             pnl = price - entry_price
             return r["timestamp"], price, pnl, f"Exit: stop loss -{stop_loss_pts}"
 
-        min_hold_bars = MOMENTUM_MIN_HOLD_BARS if momentum_entry else MIN_HOLD_BARS
+        protected_entry = momentum_entry or analysis_entry
+        min_hold_bars = MOMENTUM_MIN_HOLD_BARS if protected_entry else MIN_HOLD_BARS
 
         # Do not exit too early
         if i < min_hold_bars:
@@ -998,7 +1008,7 @@ def find_exit_after_entry(
         elif dynamic_weak_count >= DYNAMIC_WEAK_CONFIRM_BARS:
             confirmed_live_score = live_score
 
-        dynamic_rule = dynamic_trailing_rule(best_move, confirmed_live_score, momentum_entry)
+        dynamic_rule = dynamic_trailing_rule(best_move, confirmed_live_score, momentum_entry, analysis_entry)
 
         if dynamic_rule:
             lock_pts, drop_pts = dynamic_rule
@@ -1013,7 +1023,7 @@ def find_exit_after_entry(
 
         # Weakness exit is for failed trades only. Do not kill a green trade
         # just because Greeks cool off before the option makes its larger move.
-        if weak_count >= EXIT_WEAK_BARS and best_move < 25 and pnl_now <= -WEAK_EXIT_LOSS_PTS:
+        if not protected_entry and weak_count >= EXIT_WEAK_BARS and best_move < 25 and pnl_now <= -WEAK_EXIT_LOSS_PTS:
             pnl = price - entry_price
             return r["timestamp"], price, pnl, "Exit: weak failed trade"
 
@@ -2452,6 +2462,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
                 entry_price,
                 col_map,
                 momentum_entry=momentum_ok,
+                analysis_entry=analysis_quality_ok,
                 flow_score=flow_score,
                 same_side_count=same_side_count,
                 opp_side_count=opp_side_count,
