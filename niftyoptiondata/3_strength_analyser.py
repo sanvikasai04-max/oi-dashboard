@@ -378,6 +378,14 @@ MOMENTUM_PROFIT_TRAIL_TIERS = [
     (70, 45, 35),
 ]
 
+# Hard booking for strong analysis/momentum setups. This prevents a clean
+# +60/+100 option move from being carried all the way back to flat or loss.
+PROFIT_BOOK_TARGETS = [
+    (100, 90),
+    (70, 60),
+    (55, 50),
+]
+
 # Dynamic exit scoring:
 # Every minute after entry, check nearby strikes for CE/PE build.
 #
@@ -887,6 +895,17 @@ def dynamic_trailing_rule(best_move, live_score, momentum_entry, analysis_entry=
         return 25, 20
     return 10, 15
 
+def profit_book_target(best_move, protected_entry, timestamp=None, analysis_entry=False):
+    if not protected_entry:
+        return None
+    targets = PROFIT_BOOK_TARGETS
+    if analysis_entry and timestamp is not None and timestamp.time() < dtime(13, 0):
+        targets = [(100, 90)]
+    for trigger, lock in targets:
+        if best_move >= trigger:
+            return lock
+    return None
+
 def adaptive_stop_loss_pts(momentum_entry=False, flow_score=0, same_side_count=0, opp_side_count=0):
     """
     Bad-move analysis showed that strong momentum entries can dip slightly
@@ -965,6 +984,8 @@ def find_exit_after_entry(
         if i >= 3 and pnl_now > 0 and best_move >= 15 and snapshot_analysis is not None:
             analysis_reason = analysis_exit_reason(snapshot_analysis.get(r["timestamp"]), side)
             if analysis_reason:
+                if analysis_entry and best_move < 55:
+                    continue
                 pnl = price - entry_price
                 return r["timestamp"], price, pnl, analysis_reason
 
@@ -978,6 +999,11 @@ def find_exit_after_entry(
         # Do not exit too early
         if i < min_hold_bars:
             continue
+
+        book_pts = profit_book_target(best_move, protected_entry, entry_ts, analysis_entry)
+        if book_pts is not None and pnl_now >= book_pts:
+            pnl = price - entry_price
+            return r["timestamp"], price, pnl, f"Exit: profit book +{book_pts}"
 
         d_weak = r[f"{side}_d_pct"] < 0
         g_weak = r[f"{side}_g_pct"] < 0
@@ -1008,7 +1034,12 @@ def find_exit_after_entry(
         elif dynamic_weak_count >= DYNAMIC_WEAK_CONFIRM_BARS:
             confirmed_live_score = live_score
 
-        dynamic_rule = dynamic_trailing_rule(best_move, confirmed_live_score, momentum_entry, analysis_entry)
+        # Analysis entries are already governed by snapshot handoff/fading
+        # rules. Letting the generic live trail close them can exit a strong
+        # trend before the opposite side has actually taken over.
+        dynamic_rule = None if analysis_entry else dynamic_trailing_rule(
+            best_move, confirmed_live_score, momentum_entry, analysis_entry
+        )
 
         if dynamic_rule:
             lock_pts, drop_pts = dynamic_rule
@@ -2551,7 +2582,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             exit_reason = str(r[20])
             trade_day = entry_ts.date()
 
-            if active_until is not None and entry_ts < active_until:
+            if active_until is not None and entry_ts <= active_until:
                 overlapping_skip_count += 1
                 continue
 
@@ -2586,9 +2617,18 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             active_until = exit_ts if exit_ts is not None and not pd.isna(exit_ts) else entry_ts
             if exit_ts is not None and not pd.isna(exit_ts):
                 if "analysis PE fading + CE taking over" in exit_reason:
-                    analysis_reentry_block_until["pe"] = exit_ts + pd.Timedelta(minutes=15)
+                    analysis_reentry_block_until["pe"] = exit_ts + pd.Timedelta(minutes=180)
+                    if pnl_points is not None and not pd.isna(pnl_points) and float(pnl_points) >= 50:
+                        analysis_reentry_block_until["ce"] = exit_ts + pd.Timedelta(minutes=240)
+                        analysis_reentry_block_until["pe"] = exit_ts + pd.Timedelta(minutes=240)
                 elif "analysis CE fading + PE taking over" in exit_reason:
-                    analysis_reentry_block_until["ce"] = exit_ts + pd.Timedelta(minutes=15)
+                    analysis_reentry_block_until["ce"] = exit_ts + pd.Timedelta(minutes=180)
+                    if pnl_points is not None and not pd.isna(pnl_points) and float(pnl_points) >= 50:
+                        analysis_reentry_block_until["ce"] = exit_ts + pd.Timedelta(minutes=240)
+                        analysis_reentry_block_until["pe"] = exit_ts + pd.Timedelta(minutes=240)
+                elif "profit book" in exit_reason:
+                    analysis_reentry_block_until["ce"] = exit_ts + pd.Timedelta(minutes=90)
+                    analysis_reentry_block_until["pe"] = exit_ts + pd.Timedelta(minutes=90)
             if is_analysis_entry:
                 last_analysis_side = side
                 last_analysis_exit_ts = exit_ts if exit_ts is not None and not pd.isna(exit_ts) else entry_ts
