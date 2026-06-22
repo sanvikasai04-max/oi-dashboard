@@ -916,6 +916,7 @@ def find_exit_after_entry(
     flow_score=0,
     same_side_count=0,
     opp_side_count=0,
+    snapshot_analysis=None,
 ):
     cm = col_map[side]
     stop_loss_pts = adaptive_stop_loss_pts(
@@ -951,6 +952,12 @@ def find_exit_after_entry(
 
         pnl_now = price - entry_price
         best_move = best_price - entry_price
+
+        if i >= 3 and pnl_now > 0 and best_move >= 15 and snapshot_analysis is not None:
+            analysis_reason = analysis_exit_reason(snapshot_analysis.get(r["timestamp"]), side)
+            if analysis_reason:
+                pnl = price - entry_price
+                return r["timestamp"], price, pnl, analysis_reason
 
         if pnl_now <= -stop_loss_pts:
             pnl = price - entry_price
@@ -1600,6 +1607,51 @@ def snapshot_analysis_column(ts, snapshot_analysis, line_no, width=24):
     return ""
 
 
+def analysis_entry_signal(info, side):
+    if not info:
+        return False, ""
+    side_u = side.upper()
+    opp_u = "CE" if side_u == "PE" else "PE"
+    observations = [str(x) for x in info.get("observations", [])]
+    timeframes = info.get("timeframes", [])
+    final_side = info.get("final_side")
+
+    side_dominant = final_side == side_u or any(tf_side == side_u and "dominant" in verdict for _, tf_side, verdict in timeframes)
+    opp_fading = any(f"{opp_u} fading" in verdict for _, _, verdict in timeframes)
+    side_accum = any(x.startswith(f"{side_u} accumulation") or x.startswith(f"{side_u} gamma confirms") for x in observations)
+    side_fading = any(f"{side_u} fading" in verdict for _, _, verdict in timeframes) or any(x.startswith(f"{side_u} weakening") for x in observations)
+
+    if side_fading:
+        return False, ""
+    if side_accum and (side_dominant or opp_fading):
+        reason = f"ANALYSIS_{side_u}: dominant"
+        if side_accum:
+            reason += " accumulation"
+        if opp_fading:
+            reason += f" {opp_u}_fading"
+        return True, reason
+    return False, ""
+
+
+def analysis_exit_reason(info, side):
+    if not info:
+        return None
+    side_u = side.upper()
+    opp_u = "CE" if side_u == "PE" else "PE"
+    observations = [str(x) for x in info.get("observations", [])]
+    timeframes = info.get("timeframes", [])
+
+    side_fading = any(f"{side_u} fading" in verdict for _, _, verdict in timeframes) or any(x.startswith(f"{side_u} weakening") for x in observations)
+    opp_dominant = info.get("final_side") == opp_u or any(tf_side == opp_u and "dominant" in verdict for _, tf_side, verdict in timeframes)
+    opp_accum = any(x.startswith(f"{opp_u} accumulation") or x.startswith(f"{opp_u} gamma confirms") for x in observations)
+
+    if side_fading:
+        return f"Exit: analysis {side_u} fading"
+    if opp_dominant and opp_accum:
+        return f"Exit: analysis {opp_u} taking over"
+    return None
+
+
 def pct_change_col(series):
     return (series.pct_change(fill_method=None) * 100).round(2)
 
@@ -2226,6 +2278,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         flow_score, same_side_count, opp_side_count, flow_reason = get_flow_confirm(
             full, ts, stk, side
         )
+        analysis_ok, analysis_reason = analysis_entry_signal(snapshot_analysis.get(ts), side)
         early_entry_ok = early_oi_entry_ok(
             ts, side, pp, vp, flow_score, same_side_count, opp_side_count, flow_reason
         )
@@ -2240,7 +2293,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         ma_ok, ma_reason = passes_nifty_200ma_filter(r, side)
         if ma_reason == "MA missing":
             ma_missing_count += 1
-        if not ma_ok and not (momentum_ok or early_entry_ok):
+        if not ma_ok and not (momentum_ok or early_entry_ok or analysis_ok):
             if side == "ce":
                 ce_ma_reject += 1
             else:
@@ -2250,7 +2303,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         fast_ema_ok, fast_ema_reason = passes_fast_ema_direction_filter(r, side)
         if fast_ema_reason == "EMA missing":
             fast_ema_missing_count += 1
-        if not fast_ema_ok:
+        if not fast_ema_ok and not analysis_ok:
             if side == "ce":
                 ce_fast_ema_reject += 1
             else:
@@ -2260,7 +2313,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         chop_ok, chop_reason = passes_nifty_chop_filter(r)
         if chop_reason == "MA/chop missing":
             chop_missing_count += 1
-        if not chop_ok and not (momentum_ok or early_entry_ok):
+        if not chop_ok and not (momentum_ok or early_entry_ok or analysis_ok):
             chop_reject += 1
             continue
 
@@ -2283,7 +2336,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         # supported by nearby strikes. This avoids one-candle P% spikes that
         # show high price momentum but later produce tiny BEST and deep BAD.
         momentum_override_used = momentum_ok and (not ma_ok or not chop_ok)
-        if STRICT_MOMENTUM_OVERRIDE_QUALITY and momentum_override_used and not early_entry_ok:
+        if STRICT_MOMENTUM_OVERRIDE_QUALITY and momentum_override_used and not (early_entry_ok or analysis_ok):
             momentum_quality_ok = (
                 flow_score >= MOMENTUM_OVERRIDE_MIN_FLOW and
                 same_side_count >= MOMENTUM_OVERRIDE_MIN_SAME_SIDE and
@@ -2303,7 +2356,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         volume_ok = vp > 30
         flow_ok = flow_score >= MIN_ENTRY_FLOW_SCORE
 
-        if ts.time() >= LATE_ENTRY_START and flow_score < LATE_ENTRY_MIN_FLOW:
+        if ts.time() >= LATE_ENTRY_START and flow_score < LATE_ENTRY_MIN_FLOW and not analysis_ok:
             late_flow_reject += 1
             continue
 
@@ -2313,7 +2366,6 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             price_ok,
             flow_ok
         ]
-
         if side == "pe" and not flow_ok:
             pe_flow_reject += 1
 
@@ -2325,7 +2377,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         if not same_side_ok:
             low_same_side_reject += 1
 
-        if sum(strong_checks) >= 3 and same_side_ok:
+        if (sum(strong_checks) >= 3 and same_side_ok) or analysis_ok:
 
             if side == "pe":
                 pe_pass += 1
@@ -2336,6 +2388,8 @@ def run_single_analysis(csv_path=None, analysis_date=None):
                 pp * 0.30 +
                 flow_score * 4
             )
+            if analysis_ok:
+                entry_score += 75
 
             entry_price = pv  # option buy price at entry candle
 
@@ -2350,6 +2404,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
                 flow_score=flow_score,
                 same_side_count=same_side_count,
                 opp_side_count=opp_side_count,
+                snapshot_analysis=snapshot_analysis,
             )
 
             entry_price = pv
@@ -2377,6 +2432,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             f"N50={int(float(r.get('nifty_close', np.nan)) >= float(r.get('ema50', np.nan)) if not pd.isna(r.get('nifty_close', np.nan)) and not pd.isna(r.get('ema50', np.nan)) else 0)} "
             f"COMP={int(bool(r.get('ma_compression', False)))} "
             f"X={int(r.get('ema20_50_crosses', 0))} "
+            f"{'ANALYSIS_ENTRY ' + analysis_reason if analysis_ok else ''} "
             f"{momentum_reason if momentum_ok else ''} "
             f"{'EARLY_OI' if early_entry_ok else ''} {flow_reason}"
             ))
