@@ -1197,6 +1197,296 @@ def same_side_entry_ok(side, same_side_count, opp_side_count, flow_reason):
 # ══════════════════════════════════════════════════════════════════════════════
 # CORE FUNCTIONS
 # ══════════════════════════════════════════════════════════════════════════════
+def _finite_pct(value):
+    if value is None or pd.isna(value) or not np.isfinite(float(value)):
+        return 0.0
+    return float(value)
+
+def _count_true(mask):
+    return int(mask.fillna(False).sum())
+
+def build_snapshot_analysis(full):
+    """
+    Per timestamp OI read for display after each complete snapshot.
+    """
+    analysis = {}
+    prev_state = {"ce": None, "pe": None}
+    state_streak = {"ce": 0, "pe": 0}
+    prev_strong_side = None
+    strong_streak = 0
+
+    def side_snapshot(snap, side):
+        p = snap[f"{side}_p_pct"].map(_finite_pct)
+        v = snap[f"{side}_v_pct"].map(_finite_pct)
+        d = snap[f"{side}_d_pct"].map(_finite_pct)
+        g = snap[f"{side}_g_pct"].map(_finite_pct)
+        n = max(1, len(snap))
+
+        long_build = _count_true((p >= OI_BUILD_MIN_BUY_P_PCT) & (v >= OI_BUILD_MIN_BUY_V_PCT) & (d > 0))
+        short_cover = _count_true((p >= OI_BUILD_MIN_BUY_P_PCT) & (v < 0))
+        unwind = _count_true((p <= -OI_BUILD_MIN_SELL_P_DROP_PCT) & (v < 0))
+        sell_build = _count_true((p <= -OI_BUILD_MIN_SELL_P_DROP_PCT) & (v >= OI_BUILD_MIN_BUY_V_PCT))
+        delta_up = _count_true(d > 0)
+        gamma_up = _count_true(g > 0)
+
+        avg_p = float(p.mean())
+        avg_v = float(v.mean())
+        avg_d = float(d.mean())
+        avg_g = float(g.mean())
+
+        if long_build >= 2:
+            state = "LONG_BUILD"
+            label = f"fresh long build {long_build}/{n} (price+volume+delta up)"
+            strength = long_build * 3 + delta_up + gamma_up
+        elif short_cover >= 3:
+            state = "SHORT_COVER"
+            label = f"short covering {short_cover}/{n} (price up, volume down; not fresh build)"
+            strength = short_cover * 2 + delta_up
+        elif unwind >= 3:
+            state = "UNWINDING"
+            label = f"unwinding/buyers exiting {unwind}/{n} (price+volume down)"
+            strength = -unwind * 3
+        elif sell_build >= 3:
+            state = "SELL_BUILD"
+            label = f"sell pressure {sell_build}/{n} (price down, volume up)"
+            strength = -sell_build * 2
+        elif delta_up >= 3 and avg_p > 0:
+            state = "SLOW_ACCUM"
+            label = f"slow accumulation {delta_up}/{n} (delta+price improving)"
+            strength = delta_up + gamma_up
+        else:
+            state = "MIXED"
+            label = f"mixed/no clear build (Pavg {avg_p:.2f}%, Vavg {avg_v:.2f}%)"
+            strength = 0
+
+        return {
+            "state": state,
+            "label": label,
+            "strength": strength,
+            "long_build": long_build,
+            "short_cover": short_cover,
+            "unwind": unwind,
+            "sell_build": sell_build,
+            "delta_up": delta_up,
+            "gamma_up": gamma_up,
+            "avg_p": avg_p,
+            "avg_v": avg_v,
+            "avg_d": avg_d,
+            "avg_g": avg_g,
+            "n": n,
+        }
+
+    for ts, snap in full.groupby("timestamp", sort=True):
+        ce = side_snapshot(snap, "ce")
+        pe = side_snapshot(snap, "pe")
+
+        for side, info in (("ce", ce), ("pe", pe)):
+            if info["state"] == prev_state[side] and info["state"] != "MIXED":
+                state_streak[side] += 1
+            else:
+                state_streak[side] = 1
+                prev_state[side] = info["state"]
+
+        ce_has_build = ce["state"] in ("LONG_BUILD", "SLOW_ACCUM")
+        pe_has_build = pe["state"] in ("LONG_BUILD", "SLOW_ACCUM")
+        ce_has_unwind = ce["state"] in ("UNWINDING", "SELL_BUILD") or ce["unwind"] >= 3 or ce["avg_p"] < -3
+        pe_has_unwind = pe["state"] in ("UNWINDING", "SELL_BUILD") or pe["unwind"] >= 3 or pe["avg_p"] < -3
+
+        if pe["strength"] > ce["strength"] + 3 and pe_has_build and ce_has_unwind:
+            strong_side = "PE"
+        elif ce["strength"] > pe["strength"] + 3 and ce_has_build and pe_has_unwind:
+            strong_side = "CE"
+        else:
+            strong_side = "MIXED"
+
+        if strong_side == prev_strong_side and strong_side != "MIXED":
+            strong_streak += 1
+        else:
+            strong_streak = 1
+            prev_strong_side = strong_side
+
+        def side_text(side_name, info):
+            side = side_name.lower()
+            notes = [info["label"]]
+            if state_streak[side] >= 3 and info["state"] != "MIXED":
+                notes.append(f"consistency: same {info['state'].lower()} for {state_streak[side]} snapshots")
+            elif info["state"] != "MIXED":
+                notes.append("consistency: early, needs more snapshots")
+            if info["long_build"] and info["short_cover"]:
+                notes.append(f"fresh build {info['long_build']} vs covering {info['short_cover']}")
+            if info["avg_p"] > 0 and info["avg_v"] < 0:
+                notes.append("price up but volume down = short covering, not fresh long")
+            if info["avg_p"] < 0 and info["avg_v"] < 0:
+                notes.append("price+volume down = unwinding/exit")
+            if side == "ce" and info["state"] in ("LONG_BUILD", "SLOW_ACCUM") and not pe_has_unwind:
+                notes.append("opposite PE unwind missing")
+            if side == "pe" and info["state"] in ("LONG_BUILD", "SLOW_ACCUM") and not ce_has_unwind:
+                notes.append("opposite CE unwind missing")
+            return "; ".join(notes[:4])
+
+        final_side = strong_side
+
+        if strong_side == "PE":
+            final = "PE stronger than CE from current vs past snapshot context; bearish pressure"
+        elif strong_side == "CE":
+            final = "CE stronger than PE from current vs past snapshot context; bullish pressure"
+        elif ce_has_unwind and (pe_has_build or pe["avg_p"] > 0 or pe["delta_up"] >= 3):
+            final_side = "PE"
+            final = "CE unwinding while PE is improving; bearish pressure, PE side favored"
+        elif pe_has_unwind and (ce_has_build or ce["avg_p"] > 0 or ce["delta_up"] >= 3):
+            final_side = "CE"
+            final = "PE unwinding while CE is improving; bullish pressure, CE side favored"
+        elif ce_has_build and not pe_has_unwind:
+            final = "CE build seen, but PE not unwinding; do not mark CE stronger yet"
+        elif pe_has_build and not ce_has_unwind:
+            final = "PE build seen, but CE not unwinding; do not mark PE stronger yet"
+        else:
+            final = "mixed/no clear side; wait for handoff"
+
+        if strong_side != "MIXED":
+            if strong_streak >= 3:
+                final += f"; verdict consistency {strong_streak} snapshots"
+            else:
+                final += "; verdict early"
+        if ce["state"] == "UNWINDING":
+            final += "; CE unwinding"
+        if pe["state"] == "UNWINDING":
+            final += "; PE unwinding"
+
+        pe_text = side_text("PE", pe)
+        ce_text = side_text("CE", ce)
+        analysis[ts] = {
+            "pe": pe_text,
+            "ce": ce_text,
+            "final": final,
+            "final_side": final_side,
+            "pe_points": analysis_points(pe_text),
+            "ce_points": analysis_points(ce_text),
+            "final_points": analysis_points(final),
+        }
+
+    return analysis
+
+def print_snapshot_analysis(ts, snapshot_analysis):
+    info = snapshot_analysis.get(ts)
+    if not info:
+        return
+    print(f"  {bold('SNAPSHOT ANALYSIS')} {dim(str(ts)[:19])}")
+    print(f"    {red('PE side:')} {info['pe']}")
+    print(f"    {green('CE side:')} {info['ce']}")
+    print(f"    {yellow('Final:')} {info['final']}")
+
+def analysis_points(text, max_points=2):
+    points = [p.strip() for p in str(text).split(";") if p.strip()]
+    return points[:max_points] or ["mixed/no clear side"]
+
+def _compact_note(text):
+    text = str(text).strip()
+    compact_map = (
+        ("mixed/no clear build", "mixed/no clear"),
+        ("fresh long build", "fresh build"),
+        ("short covering", "short covering"),
+        ("unwinding/buyers exiting", "unwinding/exit"),
+        ("price up but volume down = short covering, not fresh long", "price up, vol down"),
+        ("price+volume down = unwinding/exit", "price+vol down"),
+        ("consistency: same", "consistent"),
+        ("consistency: early, needs more snapshots", "early, need confirm"),
+        ("consistency: needs more snapshots", "need confirm"),
+        ("opposite PE unwind missing", "PE unwind missing"),
+        ("opposite CE unwind missing", "CE unwind missing"),
+        ("PE stronger than CE from current vs past snapshot context", "PE stronger vs CE"),
+        ("CE stronger than PE from current vs past snapshot context", "CE stronger vs PE"),
+        ("bearish pressure", "bearish pressure"),
+        ("bullish pressure", "bullish pressure"),
+        ("wait for handoff", "wait handoff"),
+    )
+    for old, new in compact_map:
+        if text.startswith(old):
+            text = text.replace(old, new, 1)
+            break
+    if text.startswith("mixed/no clear") and "(" in text:
+        text = text.split("(", 1)[0].strip()
+    return text
+
+def _wrap_words(text, width):
+    text = str(text).strip()
+    if not text:
+        return [""]
+    words = text.split()
+    rows = []
+    current = ""
+    for word in words:
+        if len(word) > width:
+            if current:
+                rows.append(current)
+                current = ""
+            while len(word) > width:
+                rows.append(word[:width])
+                word = word[width:]
+            if word:
+                current = word
+            continue
+        candidate = word if not current else current + " " + word
+        if len(candidate) <= width:
+            current = candidate
+        else:
+            rows.append(current)
+            current = word
+    if current:
+        rows.append(current)
+    return rows
+
+def _point_rows(number, text, width):
+    text = _compact_note(text)
+    prefix = f"{number}. "
+    if "(" in text and text.endswith(")"):
+        main, detail = text.split("(", 1)
+        rows = []
+        for idx, part in enumerate(_wrap_words(main.strip(), width - len(prefix))):
+            rows.append((prefix if idx == 0 else "   ") + part)
+        for part in _wrap_words("(" + detail.strip(), width - 3):
+            rows.append("   " + part)
+        return rows
+    rows = []
+    for idx, part in enumerate(_wrap_words(text, width - len(prefix))):
+        rows.append((prefix if idx == 0 else "   ") + part)
+    return rows
+
+def snapshot_analysis_column(ts, snapshot_analysis, line_no, width=24):
+    info = snapshot_analysis.get(ts)
+    if not info:
+        return ""
+
+    pe_points = info.get("pe_points") or analysis_points(info.get("pe", ""))
+    ce_points = info.get("ce_points") or analysis_points(info.get("ce", ""))
+    final_points = info.get("final_points") or analysis_points(info.get("final", ""))
+
+    final_side = info.get("final_side")
+    final_color = red if final_side == "PE" else green if final_side == "CE" else yellow
+
+    panel = []
+    panel.append((red, "PE side:"))
+    for idx, point in enumerate(pe_points[:2], 1):
+        panel.extend((red, row) for row in _point_rows(idx, point, width))
+
+    panel.append((green, "CE side:"))
+    for idx, point in enumerate(ce_points[:2], 1):
+        panel.extend((green, row) for row in _point_rows(idx, point, width))
+
+    panel.append((final_color, "Final:"))
+    for idx, point in enumerate(final_points[:2], 1):
+        panel.extend((final_color, row) for row in _point_rows(idx, point, width))
+
+    if final_side in ("PE", "CE"):
+        direction = "downside bias" if final_side == "PE" else "upside bias"
+        panel.append((final_color, "Key: " + direction))
+
+    if 1 <= line_no <= len(panel):
+        color, text = panel[line_no - 1]
+        return color(text)
+    return ""
+
+
 def pct_change_col(series):
     return (series.pct_change(fill_method=None) * 100).round(2)
 
@@ -1687,9 +1977,10 @@ def run_single_analysis(csv_path=None, analysis_date=None):
 
     full       = pd.concat(records, ignore_index=True).sort_values(["timestamp","strike"])
     full       = attach_nifty_200ma(full)
+    snapshot_analysis = build_snapshot_analysis(full)
     timestamps = sorted(full["timestamp"].unique())
 
-    W  = 148   # console width — wide enough for all columns
+    W  = 177   # console width - wide enough for all columns plus compact snapshot analysis
     W3 = W + STRIKES_NEARBY * 14
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -1708,7 +1999,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     h1 = (f"  {'TIMESTAMP':<19}  {'STRIKE':>8}  {'SPOT':>8}  {'SIDE':>4}  "
           f"{'SCORE':>5}  {'STRENGTH':>18}  "
           f"{'DELTA':>10} {'D CHG%':>9}  {'GAMMA':>10} {'G CHG%':>9}  "
-          f"{'VOLUME':>10} {'V%':>9}  {'PRICE':>8} {'P%':>9}  {'IV':>7}")
+          f"{'VOLUME':>10} {'V%':>9}  {'PRICE':>8} {'P%':>9}  {'IV':>7}  {'ANALYSIS':<24}")
     print(bold(h1))
     sep(W)
     
@@ -1744,10 +2035,15 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     layer1_rows.sort(key=lambda x: (x[0], 0 if x[3] == "ce" else 1, x[1]))
 
     prev_snapshot_ts = None
+    snapshot_line_no = 0
     for ts, stk, spot, side, score, dv, dp, gv, gp, vv, vp, pv, pp, iv in snapshot_rows:
+        is_first_snapshot_row = ts != prev_snapshot_ts
         if prev_snapshot_ts is not None and ts != prev_snapshot_ts:
             print()
+            snapshot_line_no = 0
         prev_snapshot_ts = ts
+        snapshot_line_no += 1
+        analysis_txt = snapshot_analysis_column(ts, snapshot_analysis, snapshot_line_no)
 
         sc     = f"{score:5.1f}"
         bar    = strength_bar(score)
@@ -1763,7 +2059,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             f"{rjust(dim(f'{gv_d:>10.6f}'), 10)} {rjust(color_pct(gp), 9)}  "
             f"{rjust(dim(f'{vv:>10,.0f}'), 10)} {rjust(color_pct(vp, 50), 9)}  "
             f"{dim(f'{pv:>8.2f}')} {rjust(color_pct(pp), 9)}  "
-            f"{dim(f'{iv:>7.2f}%')}"
+            f"{dim(f'{iv:>7.2f}%')}  {analysis_txt:<24}"
         )
 
     if not snapshot_rows:
