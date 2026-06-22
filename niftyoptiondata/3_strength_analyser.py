@@ -1641,14 +1641,16 @@ def analysis_exit_reason(info, side):
     observations = [str(x) for x in info.get("observations", [])]
     timeframes = info.get("timeframes", [])
 
-    side_fading = any(f"{side_u} fading" in verdict for _, _, verdict in timeframes) or any(x.startswith(f"{side_u} weakening") for x in observations)
-    opp_dominant = info.get("final_side") == opp_u or any(tf_side == opp_u and "dominant" in verdict for _, tf_side, verdict in timeframes)
+    side_fade_count = sum(1 for _, _, verdict in timeframes if f"{side_u} fading" in verdict)
+    if any(x.startswith(f"{side_u} weakening") for x in observations):
+        side_fade_count += 1
+    opp_dom_count = sum(1 for _, tf_side, verdict in timeframes if tf_side == opp_u and "dominant" in verdict)
+    if info.get("final_side") == opp_u:
+        opp_dom_count += 1
     opp_accum = any(x.startswith(f"{opp_u} accumulation") or x.startswith(f"{opp_u} gamma confirms") for x in observations)
 
-    if side_fading:
-        return f"Exit: analysis {side_u} fading"
-    if opp_dominant and opp_accum:
-        return f"Exit: analysis {opp_u} taking over"
+    if side_fade_count >= 2 and opp_dom_count >= 2 and opp_accum:
+        return f"Exit: analysis {side_u} fading + {opp_u} taking over"
     return None
 
 
@@ -2512,15 +2514,23 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     if not ALLOW_OVERLAPPING_TRADES:
         single_trade_rows = []
         active_until = None
+        analysis_reentry_block_until = {"ce": None, "pe": None}
         daily_loss_count = {}
 
         for r in unique_rows:
             entry_ts = r[0]
+            side = r[3]
             exit_ts = r[5]
             pnl_points = r[7]
+            exit_reason = str(r[20])
             trade_day = entry_ts.date()
 
             if active_until is not None and entry_ts < active_until:
+                overlapping_skip_count += 1
+                continue
+
+            block_until = analysis_reentry_block_until.get(side)
+            if block_until is not None and entry_ts < block_until:
                 overlapping_skip_count += 1
                 continue
 
@@ -2533,6 +2543,11 @@ def run_single_analysis(csv_path=None, analysis_date=None):
 
             single_trade_rows.append(r)
             active_until = exit_ts if exit_ts is not None and not pd.isna(exit_ts) else entry_ts
+            if exit_ts is not None and not pd.isna(exit_ts):
+                if "analysis PE fading + CE taking over" in exit_reason:
+                    analysis_reentry_block_until["pe"] = exit_ts + pd.Timedelta(minutes=15)
+                elif "analysis CE fading + PE taking over" in exit_reason:
+                    analysis_reentry_block_until["ce"] = exit_ts + pd.Timedelta(minutes=15)
             if pnl_points is not None and not pd.isna(pnl_points) and float(pnl_points) < 0:
                 daily_loss_count[trade_day] = daily_loss_count.get(trade_day, 0) + 1
 
