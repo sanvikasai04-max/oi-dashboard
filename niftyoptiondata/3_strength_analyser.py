@@ -1652,6 +1652,46 @@ def analysis_exit_reason(info, side):
     return None
 
 
+def build_analysis_entry_rows(full, snapshot_analysis, col_map):
+    rows = []
+    for ts, info in snapshot_analysis.items():
+        snap = full[full["timestamp"] == ts]
+        if snap.empty:
+            continue
+        for side in ("ce", "pe"):
+            analysis_ok, _ = analysis_entry_signal(info, side)
+            if not analysis_ok:
+                continue
+
+            cm = col_map[side]
+            candidates = snap.copy()
+            candidates["_entry_score"] = (
+                candidates[f"{side}_score"].fillna(0) * 0.7 +
+                candidates[f"{side}_p_pct"].fillna(0).clip(lower=-20, upper=80) * 2.0 +
+                candidates[f"{side}_v_pct"].fillna(0).clip(lower=-50, upper=300) * 0.25 +
+                candidates[f"{side}_d_pct"].fillna(0).abs().clip(upper=80) * 0.35 +
+                candidates[f"{side}_g_pct"].fillna(0).clip(lower=-50, upper=120) * 0.20
+            )
+
+            filtered = candidates[
+                (candidates[f"{side}_p_pct"] > 1) &
+                (candidates[f"{side}_v_pct"] > 20) &
+                (candidates[f"{side}_g_pct"] > 0)
+            ]
+            if filtered.empty:
+                continue
+
+            r = filtered.sort_values("_entry_score", ascending=False).iloc[0]
+            rows.append((r["timestamp"], r["strike"], r["spot"], side,
+                         r[f"{side}_score"],
+                         r[cm["delta"]], r[f"{side}_d_pct"],
+                         r[cm["gamma"]], r[f"{side}_g_pct"],
+                         r[cm["volume"]], r[f"{side}_v_pct"],
+                         r[cm["price"]], r[f"{side}_p_pct"],
+                         r[cm["iv"]]))
+    return rows
+
+
 def pct_change_col(series):
     return (series.pct_change(fill_method=None) * 100).round(2)
 
@@ -2198,6 +2238,14 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     # Same timestamp → all CE first → all PE next
     snapshot_rows.sort(key=lambda x: (x[0], 0 if x[3] == "ce" else 1, x[1]))
     layer1_rows.sort(key=lambda x: (x[0], 0 if x[3] == "ce" else 1, x[1]))
+    analysis_entry_rows = build_analysis_entry_rows(full, snapshot_analysis, col_map)
+    layer1_keys = {(r[0], float(r[1]), r[3]) for r in layer1_rows}
+    analysis_entry_rows = [
+        r for r in analysis_entry_rows
+        if (r[0], float(r[1]), r[3]) not in layer1_keys
+    ]
+    entry_source_rows = layer1_rows + analysis_entry_rows
+    entry_source_rows.sort(key=lambda x: (x[0], 0 if x[3] == "ce" else 1, x[1]))
 
     prev_snapshot_ts = None
     snapshot_line_no = 0
@@ -2259,7 +2307,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     late_flow_reject = 0
     top_rows = []
 
-    for row in layer1_rows:
+    for row in entry_source_rows:
         ts, stk, spot, side, score, dv, dp, gv, gp, vv, vp, pv, pp, iv = row
 
         if side == "pe":
@@ -2355,6 +2403,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         price_ok = pp > 1
         volume_ok = vp > 30
         flow_ok = flow_score >= MIN_ENTRY_FLOW_SCORE
+        analysis_quality_ok = analysis_ok and pp > 1 and vp > 20 and gp > 0
 
         if ts.time() >= LATE_ENTRY_START and flow_score < LATE_ENTRY_MIN_FLOW and not analysis_ok:
             late_flow_reject += 1
@@ -2377,7 +2426,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         if not same_side_ok:
             low_same_side_reject += 1
 
-        if (sum(strong_checks) >= 3 and same_side_ok) or analysis_ok:
+        if (sum(strong_checks) >= 3 and same_side_ok) or analysis_quality_ok:
 
             if side == "pe":
                 pe_pass += 1
