@@ -1318,6 +1318,13 @@ def build_snapshot_analysis(full):
             points.append("PE buying pressure weak; CE rebuild has cleaner confirmation")
         return points[:4]
 
+    def side_is_fading(info):
+        return (
+            info["state"] in ("UNWINDING", "SELL_BUILD")
+            or (info["volume_drop"] >= 4 and info["price_down"] >= 3)
+            or info["avg_p"] < -1
+        )
+
     def dominance_from_snap(snap):
         ce = side_snapshot(snap, "ce")
         pe = side_snapshot(snap, "pe")
@@ -1354,7 +1361,7 @@ def build_snapshot_analysis(full):
                 out.at[idx, f"{side}_p_pct"] = _snapshot_pct_change(row[f"{prefix}_price"], prev_row[f"{prefix}_price"])
         return out
 
-    def timeframe_verdicts(ts, curr_snap):
+    def timeframe_verdicts(ts, curr_snap, curr_ce, curr_pe):
         verdicts = []
         for label, minutes in (("5m", 5), ("15m", 15), ("1h", 60)):
             anchor_limit = ts - pd.Timedelta(minutes=minutes)
@@ -1364,6 +1371,10 @@ def build_snapshot_analysis(full):
                 continue
             anchor_snap = snap_by_ts[anchors[-1]]
             side, verdict = dominance_from_snap(timeframe_snap(curr_snap, anchor_snap))
+            if side == "CE" and side_is_fading(curr_ce):
+                side, verdict = "MIXED", "CE fading now"
+            elif side == "PE" and side_is_fading(curr_pe):
+                side, verdict = "MIXED", "PE fading now"
             verdicts.append((label, side, verdict))
         return verdicts
 
@@ -1454,7 +1465,7 @@ def build_snapshot_analysis(full):
             "pe_points": analysis_points(pe_text),
             "ce_points": analysis_points(ce_text),
             "final_points": analysis_points(final),
-            "timeframes": timeframe_verdicts(ts, snap),
+            "timeframes": timeframe_verdicts(ts, snap, ce, pe),
             "observations": observation_points(ce, pe),
         }
 
