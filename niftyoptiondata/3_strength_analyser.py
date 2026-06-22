@@ -1205,6 +1205,14 @@ def _finite_pct(value):
 def _count_true(mask):
     return int(mask.fillna(False).sum())
 
+def _snapshot_pct_change(curr, prev):
+    if curr is None or prev is None or pd.isna(curr) or pd.isna(prev):
+        return 0.0
+    prev = float(prev)
+    if prev == 0:
+        return 0.0
+    return ((float(curr) - prev) / abs(prev)) * 100
+
 def build_snapshot_analysis(full):
     """
     Per timestamp OI read for display after each complete snapshot.
@@ -1214,6 +1222,8 @@ def build_snapshot_analysis(full):
     state_streak = {"ce": 0, "pe": 0}
     prev_strong_side = None
     strong_streak = 0
+    timestamp_list = list(pd.Index(full["timestamp"].unique()).sort_values())
+    snap_by_ts = {ts: snap.copy() for ts, snap in full.groupby("timestamp", sort=True)}
 
     def side_snapshot(snap, side):
         p = snap[f"{side}_p_pct"].map(_finite_pct)
@@ -1275,6 +1285,55 @@ def build_snapshot_analysis(full):
             "avg_g": avg_g,
             "n": n,
         }
+
+    def dominance_from_snap(snap):
+        ce = side_snapshot(snap, "ce")
+        pe = side_snapshot(snap, "pe")
+        ce_has_build = ce["state"] in ("LONG_BUILD", "SLOW_ACCUM")
+        pe_has_build = pe["state"] in ("LONG_BUILD", "SLOW_ACCUM")
+        ce_has_unwind = ce["state"] in ("UNWINDING", "SELL_BUILD") or ce["unwind"] >= 3 or ce["avg_p"] < -3
+        pe_has_unwind = pe["state"] in ("UNWINDING", "SELL_BUILD") or pe["unwind"] >= 3 or pe["avg_p"] < -3
+
+        if ce["strength"] > pe["strength"] + 3 and ce_has_build and pe_has_unwind:
+            return "CE", "CE dominant"
+        if pe["strength"] > ce["strength"] + 3 and pe_has_build and ce_has_unwind:
+            return "PE", "PE dominant"
+        if ce_has_unwind and (pe_has_build or pe["avg_p"] > 0 or pe["delta_up"] >= 3):
+            return "PE", "PE dominant"
+        if pe_has_unwind and (ce_has_build or ce["avg_p"] > 0 or ce["delta_up"] >= 3):
+            return "CE", "CE dominant"
+        return "MIXED", "mixed/no dominance"
+
+    def timeframe_snap(curr_snap, prev_snap):
+        prev_by_strike = {float(r["strike"]): r for _, r in prev_snap.iterrows()}
+        out = curr_snap.copy()
+        for idx, row in out.iterrows():
+            prev_row = prev_by_strike.get(float(row["strike"]))
+            for side, prefix in (("ce", "call"), ("pe", "put")):
+                if prev_row is None:
+                    out.at[idx, f"{side}_d_pct"] = 0.0
+                    out.at[idx, f"{side}_g_pct"] = 0.0
+                    out.at[idx, f"{side}_v_pct"] = 0.0
+                    out.at[idx, f"{side}_p_pct"] = 0.0
+                    continue
+                out.at[idx, f"{side}_d_pct"] = _snapshot_pct_change(row[f"{prefix}_delta"], prev_row[f"{prefix}_delta"])
+                out.at[idx, f"{side}_g_pct"] = _snapshot_pct_change(row[f"{prefix}_gamma"], prev_row[f"{prefix}_gamma"])
+                out.at[idx, f"{side}_v_pct"] = _snapshot_pct_change(row[f"{prefix}_volume"], prev_row[f"{prefix}_volume"])
+                out.at[idx, f"{side}_p_pct"] = _snapshot_pct_change(row[f"{prefix}_price"], prev_row[f"{prefix}_price"])
+        return out
+
+    def timeframe_verdicts(ts, curr_snap):
+        verdicts = []
+        for label, minutes in (("5m", 5), ("15m", 15), ("1h", 60)):
+            anchor_limit = ts - pd.Timedelta(minutes=minutes)
+            anchors = [old_ts for old_ts in timestamp_list if old_ts <= anchor_limit]
+            if not anchors:
+                verdicts.append((label, "MIXED", "not enough data"))
+                continue
+            anchor_snap = snap_by_ts[anchors[-1]]
+            side, verdict = dominance_from_snap(timeframe_snap(curr_snap, anchor_snap))
+            verdicts.append((label, side, verdict))
+        return verdicts
 
     for ts, snap in full.groupby("timestamp", sort=True):
         ce = side_snapshot(snap, "ce")
@@ -1363,6 +1422,7 @@ def build_snapshot_analysis(full):
             "pe_points": analysis_points(pe_text),
             "ce_points": analysis_points(ce_text),
             "final_points": analysis_points(final),
+            "timeframes": timeframe_verdicts(ts, snap),
         }
 
     return analysis
@@ -1476,6 +1536,10 @@ def snapshot_analysis_column(ts, snapshot_analysis, line_no, width=24):
     panel.append((final_color, "Final:"))
     for idx, point in enumerate(final_points[:2], 1):
         panel.extend((final_color, row) for row in _point_rows(idx, point, width))
+
+    for label, side, verdict in info.get("timeframes", []):
+        row_color = red if side == "PE" else green if side == "CE" else yellow
+        panel.append((row_color, f"{label}: {verdict}"))
 
     if final_side in ("PE", "CE"):
         direction = "downside bias" if final_side == "PE" else "upside bias"
