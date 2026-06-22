@@ -1238,11 +1238,19 @@ def build_snapshot_analysis(full):
         sell_build = _count_true((p <= -OI_BUILD_MIN_SELL_P_DROP_PCT) & (v >= OI_BUILD_MIN_BUY_V_PCT))
         delta_up = _count_true(d > 0)
         gamma_up = _count_true(g > 0)
+        volume_drop = _count_true(v < 0)
+        volume_surge = _count_true(v >= 30)
+        price_up = _count_true(p > 0)
+        price_down = _count_true(p < 0)
+        gamma_hot = _count_true(g >= 20)
 
         avg_p = float(p.mean())
         avg_v = float(v.mean())
         avg_d = float(d.mean())
         avg_g = float(g.mean())
+        max_v_idx = v.idxmax() if len(v) else None
+        max_v = float(v.loc[max_v_idx]) if max_v_idx is not None and np.isfinite(float(v.loc[max_v_idx])) else 0.0
+        max_v_strike = float(snap.loc[max_v_idx, "strike"]) if max_v_idx is not None else 0.0
 
         if long_build >= 2:
             state = "LONG_BUILD"
@@ -1284,7 +1292,31 @@ def build_snapshot_analysis(full):
             "avg_d": avg_d,
             "avg_g": avg_g,
             "n": n,
+            "volume_drop": volume_drop,
+            "volume_surge": volume_surge,
+            "price_up": price_up,
+            "price_down": price_down,
+            "gamma_hot": gamma_hot,
+            "max_v": max_v,
+            "max_v_strike": max_v_strike,
         }
+
+    def observation_points(ce, pe):
+        points = []
+        for side_name, info in (("PE", pe), ("CE", ce)):
+            if info["volume_drop"] >= 4 and info["price_down"] >= 3:
+                points.append(f"{side_name} weakening: volume dropping {info['volume_drop']}/{info['n']}, price negative {info['price_down']}/{info['n']}")
+            if info["long_build"] >= 2:
+                points.append(f"{side_name} accumulation: fresh build {info['long_build']}/{info['n']}, volume surge near {info['max_v_strike']:.0f}")
+            elif info["short_cover"] >= 3:
+                points.append(f"{side_name} short covering: price up with volume drop {info['short_cover']}/{info['n']}")
+            if info["gamma_hot"] >= 3:
+                points.append(f"{side_name} gamma confirms momentum on {info['gamma_hot']} strikes")
+        if pe["long_build"] >= 2 and ce["long_build"] == 0 and ce["volume_surge"] < 3:
+            points.append("CE buying pressure weak; PE rebuild has cleaner confirmation")
+        if ce["long_build"] >= 2 and pe["long_build"] == 0 and pe["volume_surge"] < 3:
+            points.append("PE buying pressure weak; CE rebuild has cleaner confirmation")
+        return points[:4]
 
     def dominance_from_snap(snap):
         ce = side_snapshot(snap, "ce")
@@ -1423,6 +1455,7 @@ def build_snapshot_analysis(full):
             "ce_points": analysis_points(ce_text),
             "final_points": analysis_points(final),
             "timeframes": timeframe_verdicts(ts, snap),
+            "observations": observation_points(ce, pe),
         }
 
     return analysis
@@ -1540,6 +1573,11 @@ def snapshot_analysis_column(ts, snapshot_analysis, line_no, width=24):
     for label, side, verdict in info.get("timeframes", []):
         row_color = red if side == "PE" else green if side == "CE" else yellow
         panel.append((row_color, f"{label}: {verdict}"))
+
+    for point in info.get("observations", []):
+        row_color = red if point.startswith("PE") or "CE buying pressure weak" in point else green if point.startswith("CE") or "PE buying pressure weak" in point else yellow
+        for row in _wrap_words(point, width):
+            panel.append((row_color, row))
 
     if final_side in ("PE", "CE"):
         direction = "downside bias" if final_side == "PE" else "upside bias"
