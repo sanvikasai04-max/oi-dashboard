@@ -321,7 +321,7 @@ TOP_N = 20
 ALLOW_OVERLAPPING_TRADES = False  # False = one active trade only; next entry after exit
 
 # Entry-quality filters from monthly bad-move review.
-ENTRY_START = dtime(9, 45)       # avoid gap-open option spikes before 09:45
+ENTRY_START = dtime(9, 30)       # allow confirmed early OI setups after opening noise
 MIN_ENTRY_FLOW_SCORE = 10        # was 6; require stronger cross-strike flow
 MIN_SAME_SIDE_COUNT = 2          # was 1; avoid single-strike noise entries
 DAILY_LOSS_LIMIT = 2             # after this many losses, late re-entry is blocked
@@ -1628,7 +1628,8 @@ def analysis_entry_signal(info, side):
 
     side_dominant = final_side == side_u or any(tf_side == side_u and "dominant" in verdict for _, tf_side, verdict in timeframes)
     opp_fading = any(f"{opp_u} fading" in verdict for _, _, verdict in timeframes)
-    side_accum = any(x.startswith(f"{side_u} accumulation") or x.startswith(f"{side_u} gamma confirms") for x in observations)
+    side_accum = any(x.startswith(f"{side_u} accumulation") for x in observations)
+    side_gamma = any(x.startswith(f"{side_u} gamma confirms") for x in observations)
     side_fading = any(f"{side_u} fading" in verdict for _, _, verdict in timeframes) or any(x.startswith(f"{side_u} weakening") for x in observations)
 
     if side_fading:
@@ -1637,6 +1638,8 @@ def analysis_entry_signal(info, side):
         reason = f"ANALYSIS_{side_u}: dominant"
         if side_accum:
             reason += " accumulation"
+        if side_gamma:
+            reason += " gamma"
         if opp_fading:
             reason += f" {opp_u}_fading"
         return True, reason
@@ -1686,6 +1689,7 @@ def build_analysis_entry_rows(full, snapshot_analysis, col_map):
             )
 
             filtered = candidates[
+                (candidates[f"{side}_d_pct"] > 3) &
                 (candidates[f"{side}_p_pct"] > 1) &
                 (candidates[f"{side}_v_pct"] > 20) &
                 (candidates[f"{side}_g_pct"] > 0)
@@ -2415,7 +2419,15 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         price_ok = pp > 1
         volume_ok = vp > 30
         flow_ok = flow_score >= MIN_ENTRY_FLOW_SCORE
-        analysis_quality_ok = analysis_ok and pp > 1 and vp > 20 and gp > 0
+        analysis_quality_ok = (
+            analysis_ok and
+            dp > 3 and
+            pp > 1 and
+            vp > 20 and
+            gp > 0 and
+            flow_ok and
+            same_side_entry_ok(side, same_side_count, opp_side_count, flow_reason)
+        )
 
         if ts.time() >= LATE_ENTRY_START and flow_score < LATE_ENTRY_MIN_FLOW and not analysis_ok:
             late_flow_reject += 1
@@ -2526,6 +2538,9 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         single_trade_rows = []
         active_until = None
         analysis_reentry_block_until = {"ce": None, "pe": None}
+        last_analysis_side = None
+        last_analysis_exit_ts = None
+        last_analysis_exit_reason = ""
         daily_loss_count = {}
 
         for r in unique_rows:
@@ -2545,6 +2560,21 @@ def run_single_analysis(csv_path=None, analysis_date=None):
                 overlapping_skip_count += 1
                 continue
 
+            is_analysis_entry = "ANALYSIS_ENTRY" in str(r[21])
+            if (
+                is_analysis_entry and
+                last_analysis_side is not None and
+                side != last_analysis_side and
+                last_analysis_exit_ts is not None and
+                entry_ts < last_analysis_exit_ts + pd.Timedelta(minutes=60)
+            ):
+                last_side_u = last_analysis_side.upper()
+                side_u = side.upper()
+                handoff_text = f"analysis {last_side_u} fading + {side_u} taking over"
+                if handoff_text not in last_analysis_exit_reason:
+                    overlapping_skip_count += 1
+                    continue
+
             if (
                 daily_loss_count.get(trade_day, 0) >= DAILY_LOSS_LIMIT and
                 entry_ts.time() >= DAILY_LOSS_CUTOFF
@@ -2559,6 +2589,10 @@ def run_single_analysis(csv_path=None, analysis_date=None):
                     analysis_reentry_block_until["pe"] = exit_ts + pd.Timedelta(minutes=15)
                 elif "analysis CE fading + PE taking over" in exit_reason:
                     analysis_reentry_block_until["ce"] = exit_ts + pd.Timedelta(minutes=15)
+            if is_analysis_entry:
+                last_analysis_side = side
+                last_analysis_exit_ts = exit_ts if exit_ts is not None and not pd.isna(exit_ts) else entry_ts
+                last_analysis_exit_reason = exit_reason
             if pnl_points is not None and not pd.isna(pnl_points) and float(pnl_points) < 0:
                 daily_loss_count[trade_day] = daily_loss_count.get(trade_day, 0) + 1
 
