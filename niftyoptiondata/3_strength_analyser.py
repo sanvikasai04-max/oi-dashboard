@@ -281,6 +281,16 @@ Exit logic added for better option-point capture:
 
      This is meant for days like 2024-02-05 where CE buildup started strongly
      before 09:45. It is not a blanket open-gap entry unlock.
+
+
+# Back data, default
+python 3_strength_analyser.py --nifty-data back
+
+# Live data
+python 3_strength_analyser.py --nifty-data live
+
+python 3_strength_analyser.py --oi-data live --nifty-data live --csv oi_live_2026_06_30.csv --date 2026-06-24
+
 """
 
 import argparse
@@ -300,9 +310,12 @@ for _stream in (sys.stdout, sys.stderr):
 # ══════════════════════════════════════════════════════════════════════════════
 # USER CONFIG
 # ══════════════════════════════════════════════════════════════════════════════
-CSV_PATH         = "oi_2024_01_02.csv"
-ANALYSIS_DATE    = "2024-01-01"
+CSV_PATH         = "oi_2026_06_24.csv"
+ANALYSIS_DATE    = "2026-06-24"
 SIDE             = "both"          # "ce" | "pe" | "both"
+OI_DATA_MODE     = "back"          # "back" | "live"
+BACK_OI_DATA_DIR = Path(__file__).resolve().parent
+LIVE_OI_DATA_DIR = Path(__file__).resolve().parents[3] / "StrategyBuilder" / "Strategy3MAGreeks" / "live_Saidata_weeklyexp"
 CROSS_CANDLES    = 5               # lookback window for cross-candle trend
 STRIKES_NEARBY   = 2
 ATM_RANGE_POINTS  = 500
@@ -447,7 +460,10 @@ OI_BUILD_GAMMA_BONUS_PER_STRIKE = 1
 #   If NIFTY close is below 200 MA -> block CE entries.
 #   If NIFTY close is above 200 MA -> block PE entries.
 USE_NIFTY_200MA_FILTER = True
-NIFTY_1MIN_PATH = Path(__file__).resolve().parents[3] / "StrategyBuilder" / "nifty50database" / "nifty_5yr_1min.xlsx"
+NIFTY_DATA_MODE = "back"  # "back" | "live"
+BACK_NIFTY_1MIN_PATH = Path(__file__).resolve().parent / "nifty_5yr_1min.xlsx"
+LIVE_NIFTY_1MIN_PATH = Path(__file__).resolve().parents[3] / "StrategyBuilder" / "nifty50database" / "nifty_live_all_timeframes.xlsx"
+NIFTY_1MIN_PATH = BACK_NIFTY_1MIN_PATH
 NIFTY_MA_PERIOD = 200
 
 # Fast intraday direction filter:
@@ -1869,7 +1885,7 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
     ws1.sheet_view.showGridLines = False
     ws1.sheet_properties.tabColor = "FFEB9C"
 
-    l1_hdr = ["TIMESTAMP","STRIKE","SPOT","SIDE","SCORE","STRENGTH",
+    l1_hdr = ["TIMESTAMP","STRIKE","SPOT","SIDE","SCORE","STRENGTH","LTP",
               "DELTA","DELTA_%","GAMMA","GAMMA_%",
               "VOLUME","VOLUME_%","PRICE","PRICE_%","IV"]
     style_header_row(ws1, l1_hdr)
@@ -1889,15 +1905,16 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
         write_cell(ws1, ri, 4,  side.upper(),              C_BRIGHT_GREEN if side=="ce" else C_BRIGHT_RED, row_bg, bold=True)
         write_cell(ws1, ri, 5,  round(score,1),            sc,             row_bg, bold=True)
         write_cell(ws1, ri, 6,  sl,                        sc,             row_bg)
-        write_cell(ws1, ri, 7,  round(float(dv),4) if safe_float(dv) is not None else None, C_WHITE, row_bg)
-        write_cell(ws1, ri, 8,  dp_t,                      dp_c,           row_bg)
-        write_cell(ws1, ri, 9,  round(float(gv),6) if safe_float(gv) is not None else None, C_WHITE, row_bg)
-        write_cell(ws1, ri, 10, gp_t,                      gp_c,           row_bg)
-        write_cell(ws1, ri, 11, int(vv) if safe_float(vv) is not None else None, C_DIM, row_bg)
-        write_cell(ws1, ri, 12, vp_t,                      vp_c,           row_bg)
-        write_cell(ws1, ri, 13, round(float(pv),2) if safe_float(pv) is not None else None, C_WHITE, row_bg)
-        write_cell(ws1, ri, 14, pp_t,                      pp_c,           row_bg)
-        write_cell(ws1, ri, 15, round(float(iv),2) if safe_float(iv) is not None else None, C_DIM, row_bg)
+        write_cell(ws1, ri, 7,  round(float(pv),2) if safe_float(pv) is not None else None, C_WHITE, row_bg)
+        write_cell(ws1, ri, 8,  round(float(dv),4) if safe_float(dv) is not None else None, C_WHITE, row_bg)
+        write_cell(ws1, ri, 9,  dp_t,                      dp_c,           row_bg)
+        write_cell(ws1, ri, 10, round(float(gv),6) if safe_float(gv) is not None else None, C_WHITE, row_bg)
+        write_cell(ws1, ri, 11, gp_t,                      gp_c,           row_bg)
+        write_cell(ws1, ri, 12, int(vv) if safe_float(vv) is not None else None, C_DIM, row_bg)
+        write_cell(ws1, ri, 13, vp_t,                      vp_c,           row_bg)
+        write_cell(ws1, ri, 14, round(float(pv),2) if safe_float(pv) is not None else None, C_WHITE, row_bg)
+        write_cell(ws1, ri, 15, pp_t,                      pp_c,           row_bg)
+        write_cell(ws1, ri, 16, round(float(iv),2) if safe_float(iv) is not None else None, C_DIM, row_bg)
 
     ws1.freeze_panes = "A2"
     autofit(ws1)
@@ -2249,7 +2266,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     )
 
     h1 = (f"  {'TIMESTAMP':<19}  {'STRIKE':>8}  {'SPOT':>8}  {'SIDE':>4}  "
-          f"{'SCORE':>5}  {'STRENGTH':>18}  "
+          f"{'SCORE':>5}  {'STRENGTH':>8}  {'LTP':>8}  "
           f"{'DELTA':>10} {'D CHG%':>9}  {'GAMMA':>10} {'G CHG%':>9}  "
           f"{'VOLUME':>10} {'V%':>9}  {'PRICE':>8} {'P%':>9}  {'IV':>7}  {'ANALYSIS':<24}")
     print(bold(h1))
@@ -2306,7 +2323,6 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         analysis_txt = snapshot_analysis_column(ts, snapshot_analysis, snapshot_line_no)
 
         sc     = f"{score:5.1f}"
-        bar    = strength_bar(score)
         lbl    = strength_label(score)
         side_c = bright_green("CE") if side == "ce" else bright_red("PE")
         dv_d   = dv
@@ -2314,7 +2330,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         print(
             f"  {dim(str(ts)[:19])}  "
             f"{cyan(f'{stk:>8.1f}')}  {cyan(f'{spot:>8.2f}')}  {side_c}  "
-            f"{bold(sc)}  {bar} {lbl}  "
+            f"{bold(sc)}  {lbl}  {dim(f'{pv:>8.2f}')}  "
             f"{rjust(dim(f'{dv_d:>10.4f}'), 10)} {rjust(color_pct(dp), 9)}  "
             f"{rjust(dim(f'{gv_d:>10.6f}'), 10)} {rjust(color_pct(gp), 9)}  "
             f"{rjust(dim(f'{vv:>10,.0f}'), 10)} {rjust(color_pct(vp, 50), 9)}  "
@@ -2521,6 +2537,10 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             bad_move, bad_time, bad_price = compute_strike_bad_move(
                 full, ts, stk, side, entry_price, col_map
             )
+            chop_score = r.get("chop_score", 0)
+            chop_score = 0 if pd.isna(chop_score) else int(chop_score)
+            ema_crosses = r.get("ema20_50_crosses", 0)
+            ema_crosses = 0 if pd.isna(ema_crosses) else int(ema_crosses)
 
             top_rows.append((
             ts, stk, spot, side,
@@ -2529,14 +2549,14 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             bad_move, bad_time, bad_price,
             entry_score, score, dp, gp, vp, pp,
             exit_reason,
-            f"{sum(strong_checks)}/4 FLOW={flow_score} CHOP={int(r.get('chop_score', 0))} "
+            f"{sum(strong_checks)}/4 FLOW={flow_score} CHOP={chop_score} "
             f"F200={int(bool(r.get('flat200', False)))} "
             f"F20={int(bool(r.get('flat20', False)))} "
             f"F50={int(bool(r.get('flat50', False)))} "
             f"N20={int(float(r.get('nifty_close', np.nan)) >= float(r.get('ema20', np.nan)) if not pd.isna(r.get('nifty_close', np.nan)) and not pd.isna(r.get('ema20', np.nan)) else 0)} "
             f"N50={int(float(r.get('nifty_close', np.nan)) >= float(r.get('ema50', np.nan)) if not pd.isna(r.get('nifty_close', np.nan)) and not pd.isna(r.get('ema50', np.nan)) else 0)} "
             f"COMP={int(bool(r.get('ma_compression', False)))} "
-            f"X={int(r.get('ema20_50_crosses', 0))} "
+            f"X={ema_crosses} "
             f"{'ANALYSIS_ENTRY ' + analysis_reason if analysis_ok else ''} "
             f"{momentum_reason if momentum_ok else ''} "
             f"{'EARLY_OI' if early_entry_ok else ''} {flow_reason}"
@@ -2864,8 +2884,12 @@ def parse_args():
                         help="Month name or number for --monthly, e.g. jan, january, 1.")
     parser.add_argument("--year", type=int,
                         help="Year for --monthly, e.g. 2024.")
-    parser.add_argument("--csv-dir", default=str(Path(__file__).resolve().parent),
-                        help="Folder containing weekly oi_YYYY_MM_DD.csv files.")
+    parser.add_argument("--oi-data", "--oi-data-mode", choices=["back", "live"], default=OI_DATA_MODE,
+                        help="OI CSV source: back=niftyoptiondata, live=Strategy3MAGreeks\\live_Saidata_weeklyexp.")
+    parser.add_argument("--csv-dir",
+                        help="Folder containing weekly oi_YYYY_MM_DD.csv files. Overrides --oi-data for monthly mode.")
+    parser.add_argument("--nifty-data", "--nifty-data-mode", choices=["back", "live"], default=NIFTY_DATA_MODE,
+                        help="NIFTY Excel source for 200MA/EMA filters: back=nifty_5yr_1min.xlsx, live=nifty_live_all_timeframes.xlsx.")
     parser.add_argument("--no-next-week", action="store_true",
                         help="Monthly mode: do not include first 7 days of next month.")
     parser.add_argument("--entry-start", type=parse_time_arg,
@@ -2906,6 +2930,13 @@ def apply_arg_config(args):
     global EARLY_ENTRY_MIN_PRICE_PCT, EARLY_ENTRY_MIN_VOLUME_PCT
     global EARLY_REQUIRE_CROSS_CONFIRM
     global RELAX_SAME_SIDE_ON_CROSS_CONFIRM
+    global NIFTY_DATA_MODE, NIFTY_1MIN_PATH, _NIFTY_200MA_CACHE
+    global OI_DATA_MODE
+
+    OI_DATA_MODE = args.oi_data
+    NIFTY_DATA_MODE = args.nifty_data
+    NIFTY_1MIN_PATH = LIVE_NIFTY_1MIN_PATH if args.nifty_data == "live" else BACK_NIFTY_1MIN_PATH
+    _NIFTY_200MA_CACHE = None
 
     if args.entry_start is not None:
         ENTRY_START = args.entry_start
@@ -3000,7 +3031,7 @@ def run_monthly(args):
         include_next_week=not args.no_next_week,
     )
 
-    csv_dir = Path(args.csv_dir)
+    csv_dir = Path(args.csv_dir) if args.csv_dir else (LIVE_OI_DATA_DIR if args.oi_data == "live" else BACK_OI_DATA_DIR)
     date_to_csv = {}
     for csv_file in sorted(csv_dir.glob("oi_*.csv")):
         file_date = date_from_oi_filename(csv_file)
@@ -3050,7 +3081,11 @@ def main():
         run_monthly(args)
         return
 
-    run_single_analysis(args.csv_path or CSV_PATH, args.analysis_date or ANALYSIS_DATE)
+    csv_path = Path(args.csv_path or CSV_PATH)
+    if not csv_path.is_absolute():
+        csv_path = (LIVE_OI_DATA_DIR if args.oi_data == "live" else BACK_OI_DATA_DIR) / csv_path
+
+    run_single_analysis(str(csv_path), args.analysis_date or ANALYSIS_DATE)
 
 
 if __name__ == "__main__":
