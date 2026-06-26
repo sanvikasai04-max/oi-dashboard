@@ -25,6 +25,8 @@ RUN MODES / COMMANDS
      Command:
        python 3_strength_analyser.py
 
+       python 3_strength_analyser.py --csv oi_2024_12_31.csv --date 2024-12-31 --console-xlsx oi_2024_12_31_console.xlsx
+
      What it does:
        - Uses hardcoded CSV_PATH and ANALYSIS_DATE from USER CONFIG below.
        - Prints the full OI buildup table from SESSION_START to SESSION_END.
@@ -289,7 +291,9 @@ python 3_strength_analyser.py --nifty-data back
 # Live data
 python 3_strength_analyser.py --nifty-data live
 
-python 3_strength_analyser.py --oi-data live --nifty-data live --csv oi_live_2026_06_30.csv --date 2026-06-24
+python 3_strength_analyser.py --oi-data live --nifty-data live --csv oi_live_2026_06_30.csv --date 2026-06-24 --print-interval 1min
+
+python 3_strength_analyser.py --oi-data live --nifty-data live --csv oi_live_2026_06_30.csv --date 2026-06-24 --print-interval 5min
 
 """
 
@@ -310,12 +314,13 @@ for _stream in (sys.stdout, sys.stderr):
 # ══════════════════════════════════════════════════════════════════════════════
 # USER CONFIG
 # ══════════════════════════════════════════════════════════════════════════════
-CSV_PATH         = "oi_2026_06_24.csv"
-ANALYSIS_DATE    = "2026-06-24"
+CSV_PATH         = "oi_2024_12_31.csv"
+ANALYSIS_DATE    = "2024-12-31"
 SIDE             = "both"          # "ce" | "pe" | "both"
 OI_DATA_MODE     = "back"          # "back" | "live"
 BACK_OI_DATA_DIR = Path(__file__).resolve().parent
 LIVE_OI_DATA_DIR = Path(__file__).resolve().parents[3] / "StrategyBuilder" / "Strategy3MAGreeks" / "live_Saidata_weeklyexp"
+OI_PRINT_INTERVAL = "5min"         # "5min" default; pass "1min" to print every candle
 CROSS_CANDLES    = 5               # lookback window for cross-candle trend
 STRIKES_NEARBY   = 2
 ATM_RANGE_POINTS  = 500
@@ -330,6 +335,8 @@ SESSION_START    = dtime(9, 20)    # filter: keep rows from this time onward
 SESSION_END      = dtime(15, 30)   # filter: keep rows up to this time
 OUT_CSV          = "strength_report.csv"
 OUT_XLSX         = "strength_report.xlsx"
+REPORTS_DIR      = Path(__file__).resolve().parent / "reports"
+OUT_CONSOLE_XLSX = str(REPORTS_DIR / "console_output.xlsx")
 TOP_N = 20
 ALLOW_OVERLAPPING_TRADES = False  # False = one active trade only; next entry after exit
 
@@ -553,6 +560,108 @@ def header(title, w=130):
     print(bold(f"  {title}"))
     print(bold("═" * w))
 
+class TeeConsole:
+    def __init__(self, wrapped):
+        self.wrapped = wrapped
+        self.parts = []
+
+    def write(self, text):
+        self.parts.append(text)
+        return self.wrapped.write(text)
+
+    def flush(self):
+        return self.wrapped.flush()
+
+    def isatty(self):
+        return getattr(self.wrapped, "isatty", lambda: False)()
+
+    def getvalue(self):
+        return "".join(self.parts)
+
+
+def ansi_to_rich_text(line):
+    from openpyxl.cell.rich_text import CellRichText, TextBlock
+    from openpyxl.cell.text import InlineFont
+
+    color_map = {
+        "31": "FF4444",
+        "32": "00CC00",
+        "33": "FFFF00",
+        "35": "FF66FF",
+        "36": "00B0F0",
+        "91": "FF5555",
+        "92": "00FF00",
+        "38;5;208": "FFA500",
+    }
+
+    result = CellRichText()
+    pos = 0
+    color = "C0C0C0"
+    bold_on = False
+    dim_on = False
+
+    for match in re.finditer(r"\033\[([0-9;]*)m", line):
+        text = line[pos:match.start()]
+        if text:
+            fg = "777777" if dim_on else color
+            result.append(TextBlock(InlineFont(rFont="Consolas", sz=9, color=fg, b=bold_on), text))
+
+        code = match.group(1) or "0"
+        if code == "0":
+            color = "C0C0C0"
+            bold_on = False
+            dim_on = False
+        elif code == "1":
+            bold_on = True
+        elif code == "2":
+            dim_on = True
+        elif code in color_map:
+            color = color_map[code]
+            dim_on = False
+        elif code.startswith("38;5;"):
+            color = color_map.get(code, "C0C0C0")
+            dim_on = False
+        pos = match.end()
+
+    tail = line[pos:]
+    if tail:
+        fg = "777777" if dim_on else color
+        result.append(TextBlock(InlineFont(rFont="Consolas", sz=9, color=fg, b=bold_on), tail))
+    return result if result else strip_ansi(line)
+
+
+def export_console_xlsx(console_text, output_path=OUT_CONSOLE_XLSX):
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    output_path = Path(output_path)
+    if not output_path.is_absolute() and output_path.parent == Path("."):
+        output_path = REPORTS_DIR / output_path
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Console Output"
+    ws.sheet_view.showGridLines = False
+    ws.freeze_panes = "A2"
+    ws.column_dimensions["A"].width = 230
+
+    header_cell = ws["A1"]
+    header_cell.value = "Console Output"
+    header_cell.font = Font(name="Consolas", bold=True, color="FFFFFF", size=10)
+    header_cell.fill = PatternFill("solid", fgColor="1F4E79")
+
+    dark_fill = PatternFill("solid", fgColor="0B0B0B")
+    for row_idx, line in enumerate(console_text.splitlines(), 2):
+        cell = ws.cell(row=row_idx, column=1)
+        cell.value = ansi_to_rich_text(line)
+        cell.fill = dark_fill
+        cell.alignment = Alignment(horizontal="left", vertical="center")
+        ws.row_dimensions[row_idx].height = 15
+
+    wb.save(output_path)
+    print(f"Console Excel written: {output_path.resolve()}")
+
 def parse_month(value):
     raw = str(value).strip().lower()
     names = {
@@ -582,6 +691,31 @@ def parse_time_arg(value):
         return dtime(int(hour), int(minute))
     except Exception as exc:
         raise argparse.ArgumentTypeError(f"Invalid time '{value}'. Use HH:MM, e.g. 09:25") from exc
+
+def parse_print_interval_arg(value):
+    raw = str(value).strip().lower()
+    aliases = {
+        "1": "1min",
+        "1m": "1min",
+        "1min": "1min",
+        "1mins": "1min",
+        "5": "5min",
+        "5m": "5min",
+        "5min": "5min",
+        "5mins": "5min",
+    }
+    if raw not in aliases:
+        raise argparse.ArgumentTypeError("Invalid print interval. Use 1min or 5min.")
+    return aliases[raw]
+
+def print_interval_minutes():
+    return 1 if OI_PRINT_INTERVAL == "1min" else 5
+
+def is_print_interval_timestamp(ts):
+    if print_interval_minutes() == 1:
+        return True
+    ts = pd.Timestamp(ts)
+    return ts.minute % print_interval_minutes() == 0
 
 def month_name(month):
     return pd.Timestamp(2000, month, 1).strftime("%B")
@@ -2153,6 +2287,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     print(f"  {dim('Timestamps:')} {df['timestamp'].nunique()}  "
           f"{dim('Strikes:')} {df['strike'].nunique()}  "
           f"{dim('Sides:')} {SIDE.upper()}  "
+          f"{dim('OI print interval:')} {OI_PRINT_INTERVAL}  "
           f"{dim('X-candle window:')} {CROSS_CANDLES}  "
           f"{dim('Nearby strikes:')} ±{STRIKES_NEARBY}\n")
 
@@ -2255,7 +2390,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     # ══════════════════════════════════════════════════════════════════════════
     # LAYER 1 — SAME-CANDLE SPIKE REPORT
     # ══════════════════════════════════════════════════════════════════════════
-    header("SNAPSHOT OI BUILDUP — every timestamp, CE first then PE", W)
+    header(f"SNAPSHOT OI BUILDUP — every {OI_PRINT_INTERVAL}, CE first then PE", W)
     print(f"  {dim('Layer 1 threshold: runtime percentile ≥')} {bold(str(STRENGTH_PCT))}th\n")
 
     print(
@@ -2275,8 +2410,9 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     
     snapshot_rows = []
     layer1_rows = []
+    display_full = full[full["timestamp"].map(is_print_interval_timestamp)].copy()
     for side in sides:
-        for _, r in full.iterrows():
+        for _, r in display_full.iterrows():
             snapshot_rows.append((r["timestamp"], r["strike"], r["spot"], side,
                                   r[f"{side}_score"],
                                   r[col_map[side]["delta"]], r[f"{side}_d_pct"],
@@ -2890,6 +3026,8 @@ def parse_args():
                         help="Folder containing weekly oi_YYYY_MM_DD.csv files. Overrides --oi-data for monthly mode.")
     parser.add_argument("--nifty-data", "--nifty-data-mode", choices=["back", "live"], default=NIFTY_DATA_MODE,
                         help="NIFTY Excel source for 200MA/EMA filters: back=nifty_5yr_1min.xlsx, live=nifty_live_all_timeframes.xlsx.")
+    parser.add_argument("--print-interval", "--oi-print-interval", type=parse_print_interval_arg, default=OI_PRINT_INTERVAL,
+                        help="Snapshot OI buildup print interval: 5min default, or 1min to print every candle.")
     parser.add_argument("--no-next-week", action="store_true",
                         help="Monthly mode: do not include first 7 days of next month.")
     parser.add_argument("--entry-start", type=parse_time_arg,
@@ -2920,6 +3058,9 @@ def parse_args():
                         help="Early entries can use strong same-side flow even without OI_BULL/OI_BEAR.")
     parser.add_argument("--no-relax-cross-side", action="store_true",
                         help="Disable relaxed same-side rule when OI_BULL/OI_BEAR has opposite-side support.")
+    parser.add_argument("--console-xlsx", nargs="?", const=OUT_CONSOLE_XLSX,
+                        help="Dump the exact colored console output to an Excel file. "
+                             f"Default file: {OUT_CONSOLE_XLSX}.")
     return parser.parse_args()
 
 def apply_arg_config(args):
@@ -2932,8 +3073,10 @@ def apply_arg_config(args):
     global RELAX_SAME_SIDE_ON_CROSS_CONFIRM
     global NIFTY_DATA_MODE, NIFTY_1MIN_PATH, _NIFTY_200MA_CACHE
     global OI_DATA_MODE
+    global OI_PRINT_INTERVAL
 
     OI_DATA_MODE = args.oi_data
+    OI_PRINT_INTERVAL = args.print_interval
     NIFTY_DATA_MODE = args.nifty_data
     NIFTY_1MIN_PATH = LIVE_NIFTY_1MIN_PATH if args.nifty_data == "live" else BACK_NIFTY_1MIN_PATH
     _NIFTY_200MA_CACHE = None
@@ -3077,15 +3220,26 @@ def main():
 
     args = parse_args()
     apply_arg_config(args)
-    if args.monthly:
-        run_monthly(args)
-        return
+    console_capture = None
+    old_stdout = sys.stdout
+    if args.console_xlsx:
+        console_capture = TeeConsole(sys.stdout)
+        sys.stdout = console_capture
 
-    csv_path = Path(args.csv_path or CSV_PATH)
-    if not csv_path.is_absolute():
-        csv_path = (LIVE_OI_DATA_DIR if args.oi_data == "live" else BACK_OI_DATA_DIR) / csv_path
+    try:
+        if args.monthly:
+            run_monthly(args)
+            return
 
-    run_single_analysis(str(csv_path), args.analysis_date or ANALYSIS_DATE)
+        csv_path = Path(args.csv_path or CSV_PATH)
+        if not csv_path.is_absolute():
+            csv_path = (LIVE_OI_DATA_DIR if args.oi_data == "live" else BACK_OI_DATA_DIR) / csv_path
+
+        run_single_analysis(str(csv_path), args.analysis_date or ANALYSIS_DATE)
+    finally:
+        if console_capture is not None:
+            sys.stdout = old_stdout
+            export_console_xlsx(console_capture.getvalue(), args.console_xlsx)
 
 
 if __name__ == "__main__":
