@@ -17,10 +17,7 @@ Current entry/exit model
 ========================
 
 Only the strict cross-strike confirmation rule is used for option trade entry
-and exit. The older ideas such as MA/chop entry blocking, generic flow entry,
-early-entry unlocks, price-momentum override entries, analysis-text entries,
-adaptive momentum stop loss, profit ladder exits, dynamic trailing exits, and
-weak failed-trade exits are not used for trade decisions now.
+and exit.
 
 CE entry criteria
 -----------------
@@ -97,9 +94,7 @@ for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # USER CONFIG
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 CSV_PATH         = "oi_2026_06_16.csv"
 ANALYSIS_DATE    = "2026-06-16"
 SIDE             = "both"          # "ce" | "pe" | "both"
@@ -159,13 +154,13 @@ STRICT_CONFIRM_WINDOW = 5
 STRICT_MIN_CONFIRM_BARS = 3
 STRICT_ALLOW_VOLUME_NEUTRAL = True
 STRICT_EXIT_CONFIRM_BARS = 2
+_STRICT_BEST_CACHE = {}
 
 # Exit config: fixed stop, strict opposite confirmation, or force exit only.
 STOP_LOSS_PTS = 30
 
 ENTRY_CUTOFF = dtime(15, 0)   # no new entries after 3 PM
 FORCE_EXIT   = dtime(15, 25)  # force exit near market close, after late moves can mature
-MAX_PRICE_XPCT = 20
 
 # Cross-side OI buildup confirmation:
 # Bullish setup = CE buying across nearby strikes + PE selling confirmation.
@@ -186,45 +181,7 @@ OI_BUILD_MIN_SELL_STRIKES = 2
 OI_BUILD_STRONG_BONUS = 4
 OI_BUILD_GAMMA_BONUS_PER_STRIKE = 1
 
-# NIFTY 200 MA trend filter:
-#   If NIFTY close is below 200 MA -> block CE entries.
-#   If NIFTY close is above 200 MA -> block PE entries.
-USE_NIFTY_200MA_FILTER = True
-NIFTY_DATA_MODE = "back"  # "back" | "live"
-BACK_NIFTY_1MIN_PATH = Path(__file__).resolve().parent / "nifty_5yr_1min.xlsx"
-LIVE_NIFTY_1MIN_PATH = Path(__file__).resolve().parents[3] / "StrategyBuilder" / "nifty50database" / "nifty_live_all_timeframes.xlsx"
-NIFTY_1MIN_PATH = BACK_NIFTY_1MIN_PATH
-NIFTY_MA_PERIOD = 200
-
-# Fast intraday direction filter:
-# CE only when NIFTY is above both EMA20 and EMA50.
-# PE only when NIFTY is below both EMA20 and EMA50.
-# This avoids PE entries while price is still above 20/50 MA.
-USE_FAST_EMA_DIRECTION_FILTER = True
-
-# NIFTY chop filter from EMA slope/compression/crossing/range.
-# If chop score >= threshold, skip both CE and PE entries.
-USE_NIFTY_CHOP_FILTER = True
-CHOP_SCORE_THRESHOLD = 3
-BLOCK_IF_FLAT_200 = True
-USE_SIMPLE_CHOP_HARD_BLOCK = True
-FLAT_200_LOOKBACK = 30
-FLAT_200_MAX_MOVE = 15
-FLAT_20_LOOKBACK = 10
-FLAT_20_MAX_MOVE = 8
-FLAT_50_LOOKBACK = 15
-FLAT_50_MAX_MOVE = 10
-EMA20_50_GAP_MAX = 15
-EMA50_200_GAP_MAX = 30
-CLOSE_EMA20_GAP_MAX = 10
-CROSS_LOOKBACK = 20
-CROSS_COUNT_MIN = 3
-AVG_RANGE_LOOKBACK = 20
-AVG_RANGE_MAX = 10
-_NIFTY_200MA_CACHE = None
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-
-# â”€â”€ ANSI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ANSI helpers
 def _c(t, code): return f"\033[{code}m{t}\033[0m"
 def green(t):        return _c(t, "32")
 def bright_green(t): return _c(t, "92")
@@ -248,7 +205,7 @@ def ljust(s, w):
 
 def color_pct(val, extreme=20.0):
     if pd.isna(val): return dim("    n/a ")
-    sign = "â–²" if val > 0 else "â–¼" if val < 0 else " "
+    sign = "^" if val > 0 else "v" if val < 0 else " "
     txt  = f"{sign}{abs(val):6.2f}%"
     if val > extreme:    return bright_green(txt)
     elif val > 0:        return green(txt)
@@ -277,11 +234,11 @@ def strength_label(score):
     if score >= 25: return yellow("WEAK    ")
     return red("VERY WK ")
 
-def sep(w=130): print(dim("â”€" * w))
+def sep(w=130): print(dim("-" * w))
 def header(title, w=130):
-    print(bold("â•" * w))
+    print(bold("=" * w))
     print(bold(f"  {title}"))
-    print(bold("â•" * w))
+    print(bold("=" * w))
 
 class TeeConsole:
     def __init__(self, wrapped):
@@ -487,147 +444,6 @@ def monthly_signal_date(csv_file):
         return file_date
     return dates[-1]
 
-def load_nifty_200ma():
-    global _NIFTY_200MA_CACHE
-
-    if not USE_NIFTY_200MA_FILTER:
-        return None
-
-    if _NIFTY_200MA_CACHE is not None:
-        return _NIFTY_200MA_CACHE
-
-    path = Path(NIFTY_1MIN_PATH)
-    if not path.exists():
-        print(yellow(f"  NIFTY 200 MA filter skipped: file not found: {path}"))
-        return None
-
-    nifty = pd.read_excel(path, usecols=["datetime", "high", "low", "close"])
-    nifty["timestamp"] = pd.to_datetime(nifty["datetime"], dayfirst=True, errors="coerce")
-    nifty["nifty_close"] = pd.to_numeric(nifty["close"], errors="coerce")
-    nifty["nifty_high"] = pd.to_numeric(nifty["high"], errors="coerce")
-    nifty["nifty_low"] = pd.to_numeric(nifty["low"], errors="coerce")
-    nifty = nifty.dropna(subset=["timestamp", "nifty_close", "nifty_high", "nifty_low"]).sort_values("timestamp")
-
-    nifty["ema20"] = nifty["nifty_close"].ewm(span=20, adjust=False).mean()
-    nifty["ema50"] = nifty["nifty_close"].ewm(span=50, adjust=False).mean()
-    nifty["nifty_ma200"] = nifty["nifty_close"].ewm(span=NIFTY_MA_PERIOD, adjust=False).mean()
-    nifty["ema20_slope"] = nifty["ema20"] - nifty["ema20"].shift(FLAT_20_LOOKBACK)
-    nifty["ema50_slope"] = nifty["ema50"] - nifty["ema50"].shift(FLAT_50_LOOKBACK)
-
-    nifty["flat200"] = (nifty["nifty_ma200"] - nifty["nifty_ma200"].shift(FLAT_200_LOOKBACK)).abs() < FLAT_200_MAX_MOVE
-    nifty["flat20"] = (nifty["ema20"] - nifty["ema20"].shift(FLAT_20_LOOKBACK)).abs() < FLAT_20_MAX_MOVE
-    nifty["flat50"] = (nifty["ema50"] - nifty["ema50"].shift(FLAT_50_LOOKBACK)).abs() < FLAT_50_MAX_MOVE
-
-    nifty["ma_compression"] = (
-        ((nifty["ema20"] - nifty["ema50"]).abs() < EMA20_50_GAP_MAX) &
-        ((nifty["ema50"] - nifty["nifty_ma200"]).abs() < EMA50_200_GAP_MAX) &
-        ((nifty["nifty_close"] - nifty["ema20"]).abs() < CLOSE_EMA20_GAP_MAX)
-    )
-
-    ema_diff = nifty["ema20"] - nifty["ema50"]
-    cross_now = (np.sign(ema_diff) != np.sign(ema_diff.shift(1))).astype(int)
-    nifty["ema20_50_crosses"] = cross_now.rolling(CROSS_LOOKBACK, min_periods=1).sum()
-    nifty["many_crosses"] = nifty["ema20_50_crosses"] >= CROSS_COUNT_MIN
-
-    nifty["avg_range20"] = (nifty["nifty_high"] - nifty["nifty_low"]).rolling(AVG_RANGE_LOOKBACK, min_periods=1).mean()
-    nifty["small_range"] = nifty["avg_range20"] < AVG_RANGE_MAX
-
-    chop_cols = ["flat200", "flat50", "flat20", "ma_compression", "many_crosses", "small_range"]
-    nifty["chop_score"] = nifty[chop_cols].astype(int).sum(axis=1)
-
-    _NIFTY_200MA_CACHE = nifty[[
-        "timestamp", "nifty_close", "nifty_ma200", "ema20", "ema50",
-        "ema20_slope", "ema50_slope",
-        "flat200", "flat50", "flat20", "ma_compression", "many_crosses",
-        "small_range", "ema20_50_crosses", "avg_range20", "chop_score",
-    ]].dropna(subset=["nifty_ma200"])
-    return _NIFTY_200MA_CACHE
-
-def attach_nifty_200ma(full):
-    nifty = load_nifty_200ma()
-    if nifty is None or nifty.empty:
-        full["nifty_close"] = np.nan
-        full["nifty_ma200"] = np.nan
-        full["chop_score"] = 0
-        return full
-
-    merged = pd.merge_asof(
-        full.sort_values("timestamp"),
-        nifty.sort_values("timestamp"),
-        on="timestamp",
-        direction="backward",
-        tolerance=pd.Timedelta("1min"),
-    )
-    return merged.sort_values(["timestamp", "strike"]).reset_index(drop=True)
-
-def passes_nifty_200ma_filter(row, side):
-    if not USE_NIFTY_200MA_FILTER:
-        return True, "OFF"
-
-    close = row.get("nifty_close", np.nan)
-    ma200 = row.get("nifty_ma200", np.nan)
-    if pd.isna(close) or pd.isna(ma200):
-        return True, "MA missing"
-
-    if side == "ce" and close < ma200:
-        return False, "CE blocked: NIFTY below 200 MA"
-    if side == "pe" and close > ma200:
-        return False, "PE blocked: NIFTY above 200 MA"
-    return True, "OK"
-
-def passes_fast_ema_direction_filter(row, side):
-    if not USE_FAST_EMA_DIRECTION_FILTER:
-        return True, "OFF"
-
-    close = row.get("nifty_close", np.nan)
-    ema20 = row.get("ema20", np.nan)
-    ema50 = row.get("ema50", np.nan)
-    if pd.isna(close) or pd.isna(ema20) or pd.isna(ema50):
-        return True, "EMA missing"
-
-    if side == "ce" and not (close >= ema20 and close >= ema50):
-        return False, "CE blocked: NIFTY below EMA20/EMA50"
-    if side == "pe" and not (close <= ema20 and close <= ema50):
-        return False, "PE blocked: NIFTY above EMA20/EMA50"
-    return True, "OK"
-
-def passes_nifty_chop_filter(row):
-    if not USE_NIFTY_CHOP_FILTER:
-        return True, "OFF"
-
-    score = row.get("chop_score", np.nan)
-    if pd.isna(score):
-        return True, "MA/chop missing"
-
-    reasons = []
-    for col, label in [
-        ("flat200", "flat200"),
-        ("flat50", "flat50"),
-        ("flat20", "flat20"),
-        ("ma_compression", "compression"),
-        ("many_crosses", "crosses"),
-        ("small_range", "small_range"),
-    ]:
-        if bool(row.get(col, False)):
-            reasons.append(label)
-
-    flat200 = bool(row.get("flat200", False))
-    flat20 = bool(row.get("flat20", False))
-    many_crosses = bool(row.get("many_crosses", False))
-    compression = bool(row.get("ma_compression", False))
-    flat50 = bool(row.get("flat50", False))
-
-    if BLOCK_IF_FLAT_200 and flat200:
-        return False, "FLAT_200_BLOCK " + ",".join(reasons)
-
-    if USE_SIMPLE_CHOP_HARD_BLOCK and flat200 and flat20 and (many_crosses or compression or flat50):
-        return False, "HARD_CHOP " + ",".join(reasons)
-
-    if score < CHOP_SCORE_THRESHOLD:
-        return True, f"score {int(score)}"
-
-    return False, f"CHOP {int(score)}: " + ",".join(reasons)
-
 def find_exit_after_entry(
     full,
     entry_ts,
@@ -666,20 +482,20 @@ def find_exit_after_entry(
             return r["timestamp"], price, pnl_now, f"Exit: stop loss -{stop_loss_pts}"
 
         opp = opposite_side(side)
-        opp_ok, opp_score, _, _, opp_reason = strict_cross_snapshot(
+        opp_ok, opp_score, opp_own, opp_other, opp_units, opp_strike, opp_reason = strict_best_snapshot(
             full, r["timestamp"], strike, opp
         )
         if opp_ok:
             strict_opp_confirm_count += 1
             if strict_opp_first_score is None:
-                strict_opp_first_score = opp_score
+                strict_opp_first_score = opp_units
             if (
                 strict_opp_confirm_count >= STRICT_EXIT_CONFIRM_BARS and
-                opp_score >= strict_opp_first_score
+                opp_units >= strict_opp_first_score
             ):
                 return r["timestamp"], price, pnl_now, (
                     f"Exit: strict opposite confirm {opp_reason} "
-                    f"CNT={strict_opp_confirm_count}"
+                    f"STRIKE={opp_strike} CNT={strict_opp_confirm_count}"
                 )
         else:
             strict_opp_confirm_count = 0
@@ -788,6 +604,46 @@ def strict_cross_snapshot(full, ts, strike, side):
     )
     return ok, score, own_count, opp_count, reason
 
+def strict_candidate_strikes(full, ts, strike):
+    nearby = full[
+        (full["timestamp"] == ts) &
+        (full["strike"] >= strike - STRIKES_NEARBY * STRIKE_STEP) &
+        (full["strike"] <= strike + STRIKES_NEARBY * STRIKE_STEP)
+    ]["strike"].dropna().unique()
+    return sorted(nearby)
+
+def strict_best_snapshot(full, ts, strike, side):
+    cache_key = (id(full), pd.Timestamp(ts), float(strike), side)
+    cached = _STRICT_BEST_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    best = None
+    for candidate_strike in strict_candidate_strikes(full, ts, strike):
+        ok, score, own_count, opp_count, reason = strict_cross_snapshot(
+            full, ts, candidate_strike, side
+        )
+        strength_units = own_count + opp_count
+        candidate = (
+            ok,
+            score,
+            own_count,
+            opp_count,
+            strength_units,
+            candidate_strike,
+            reason,
+        )
+        if best is None:
+            best = candidate
+            continue
+        if (ok, strength_units, score) > (best[0], best[4], best[1]):
+            best = candidate
+
+    if best is None:
+        best = (False, 0, 0, 0, 0, strike, "STRICT_NO_NEARBY")
+    _STRICT_BEST_CACHE[cache_key] = best
+    return best
+
 def strict_cross_entry_ok(full, ts, strike, side):
     if not USE_STRICT_CROSS_ENTRY:
         return False, 0, "STRICT_OFF"
@@ -796,26 +652,43 @@ def strict_cross_entry_ok(full, ts, strike, side):
     recent = timestamps[-STRICT_CONFIRM_WINDOW:]
     confirmations = []
     for snap_ts in recent:
-        ok, score, own_count, opp_count, reason = strict_cross_snapshot(full, snap_ts, strike, side)
+        ok, score, own_count, opp_count, strength_units, snap_strike, reason = strict_best_snapshot(
+            full, snap_ts, strike, side
+        )
         if ok:
-            confirmations.append((snap_ts, score, own_count, opp_count, reason))
+            confirmations.append((
+                snap_ts,
+                score,
+                own_count,
+                opp_count,
+                strength_units,
+                snap_strike,
+                reason,
+            ))
 
     if len(confirmations) < STRICT_MIN_CONFIRM_BARS:
         return False, 0, f"STRICT_WAIT {len(confirmations)}/{STRICT_MIN_CONFIRM_BARS}"
 
     first_score = confirmations[0][1]
     last_score = confirmations[-1][1]
-    if last_score < first_score:
-        return False, last_score, f"STRICT_NOT_STRONGER {last_score}<{first_score}"
+    first_units = confirmations[0][4]
+    last_units = confirmations[-1][4]
+    if last_units < first_units:
+        return False, last_score, f"STRICT_NOT_STRONGER {last_units}<{first_units}"
 
-    reason = confirmations[-1][4] + f" CONF={len(confirmations)}/{len(recent)} FIRST={first_score} LAST={last_score}"
+    reason = (
+        confirmations[-1][6] +
+        f" STRIKE={confirmations[-1][5]} CONF={len(confirmations)}/{len(recent)} "
+        f"FIRST_UNITS={first_units} LAST_UNITS={last_units} "
+        f"FIRST_SCORE={first_score} LAST_SCORE={last_score}"
+    )
     return True, last_score, reason
 
 def opposite_side(side):
     return "pe" if side == "ce" else "ce"
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# 
 # CORE FUNCTIONS
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# 
 def _finite_pct(value):
     if value is None or pd.isna(value) or not np.isfinite(float(value)):
         return 0.0
@@ -1256,15 +1129,15 @@ def safe_float(x):
     except Exception:
         return None
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# XLSX EXPORT  â€” mimics console colours as cell fills / fonts
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# 
+# XLSX EXPORT   mimics console colours as cell fills / fonts
+# 
 def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_cols, timestamps):
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side as XLSide
     from openpyxl.utils import get_column_letter
 
-    # â”€â”€ Palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    #  Palette 
     HDR_BG      = PatternFill("solid", start_color="1F4E79")
     HDR_FONT    = Font(name="Consolas", bold=True, color="FFFFFF", size=10)
     BODY_FONT   = Font(name="Consolas", size=9)
@@ -1295,7 +1168,7 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
         """Return (text_str, hex_color) for a pct value."""
         if val is None or (isinstance(val, float) and np.isnan(val)):
             return "n/a", C_DIM
-        sign = "â–²" if val > 0 else "â–¼" if val < 0 else " "
+        sign = "^" if val > 0 else "v" if val < 0 else " "
         txt  = f"{sign}{abs(val):.2f}%"
         if val > extreme:    clr = C_BRIGHT_GREEN
         elif val > 0:        clr = C_GREEN
@@ -1341,9 +1214,9 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
 
     wb = Workbook()
 
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    # SHEET 1 â€” LAYER 1  Same-Candle Spikes
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # 
+    # SHEET 1  LAYER 1  Same-Candle Spikes
+    # 
     ws1 = wb.active
     ws1.title       = "L1 Same-Candle Spikes"
     ws1.sheet_view.showGridLines = False
@@ -1383,9 +1256,9 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
     ws1.freeze_panes = "A2"
     autofit(ws1)
 
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    # SHEET 2 â€” LAYER 2  Cross-Candle Trend
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # 
+    # SHEET 2  LAYER 2  Cross-Candle Trend
+    # 
     ws2 = wb.create_sheet("L2 Cross-Candle Trend")
     ws2.sheet_view.showGridLines = False
     ws2.sheet_properties.tabColor = "00BFFF"
@@ -1419,9 +1292,9 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
     ws2.freeze_panes = "A2"
     autofit(ws2)
 
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    # SHEET 3 â€” LAYER 3  Cross-Strike Confirmation
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # 
+    # SHEET 3  LAYER 3  Cross-Strike Confirmation
+    # 
     ws3 = wb.create_sheet("L3 Cross-Strike Confirm")
     ws3.sheet_view.showGridLines = False
     ws3.sheet_properties.tabColor = "9900FF"
@@ -1474,9 +1347,9 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
     ws3.freeze_panes = "A2"
     autofit(ws3)
 
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    # SHEET 4 â€” LAYER 4  Opposite-Side Weak Confirmation
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # 
+    # SHEET 4  LAYER 4  Opposite-Side Weak Confirmation
+    # 
     ws4 = wb.create_sheet("L4 Opp-Side Confirm")
     ws4.sheet_view.showGridLines = False
     ws4.sheet_properties.tabColor = "FF4500"
@@ -1491,7 +1364,7 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
         is_bull   = "BULL" in sig_clean
         row_bg    = "1A3A1A" if is_bull else "3A1A1A"
         sig_c     = C_BRIGHT_GREEN if is_bull else C_BRIGHT_RED
-        sig_txt   = "â–² BULLISH CONFIRM" if is_bull else "â–¼ BEARISH CONFIRM"
+        sig_txt   = " BULLISH CONFIRM" if is_bull else " BEARISH CONFIRM"
 
         ce_dp_t, ce_dp_c = pct_color(safe_float(ce_dp))
         ce_gp_t, ce_gp_c = pct_color(safe_float(ce_gp))
@@ -1513,9 +1386,9 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
     ws4.freeze_panes = "A2"
     autofit(ws4)
 
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    # SHEET 5 â€” Full Data
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # 
+    # SHEET 5  Full Data
+    # 
     ws_fd = wb.create_sheet("Full Data")
     ws_fd.sheet_view.showGridLines = False
     ws_fd.sheet_properties.tabColor = "444444"
@@ -1539,16 +1412,17 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
     ws_fd.freeze_panes = "A2"
     autofit(ws_fd)
 
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # 
     # Set dark background for all sheets' tab area via sheet background
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # 
     wb.save(OUT_XLSX)
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# 
 # MAIN
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# 
 def run_single_analysis(csv_path=None, analysis_date=None):
+    _STRICT_BEST_CACHE.clear()
     csv_path = csv_path or CSV_PATH
     analysis_date = analysis_date or ANALYSIS_DATE
 
@@ -1556,7 +1430,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     if not csv.exists():
         raise FileNotFoundError(f"CSV not found: {csv_path}\nRun 1_db_to_csv.py first.")
 
-    print(bold(cyan(f"\n  Loading {csv_path} â€¦")))
+    print(bold(cyan(f"\n  Loading {csv_path} ")))
     df = pd.read_csv(csv, parse_dates=["timestamp"])
     print("CSV date range:", df["timestamp"].min(), "to", df["timestamp"].max())
 
@@ -1586,13 +1460,13 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     df.sort_values(["timestamp", "strike"], inplace=True)
     df.reset_index(drop=True, inplace=True)
 
-    # â”€â”€ Session time filter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    #  Session time filter 
     before = len(df)
 
     df = df[df["timestamp"].dt.time.between(SESSION_START, SESSION_END)].copy()
     df.reset_index(drop=True, inplace=True)
 
-    # Keep only ATM Â±100 points for each timestamp
+    # Keep only ATM 100 points for each timestamp
     df["atm_strike"] = (df["spot"] / STRIKE_STEP).round() * STRIKE_STEP
 
     df = df[
@@ -1603,8 +1477,8 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     df.drop(columns=["atm_strike"], inplace=True)
     df.reset_index(drop=True, inplace=True)
     after  = len(df)
-    print(f"  {dim('Time filter:')} {SESSION_START.strftime('%H:%M')} â€“ {SESSION_END.strftime('%H:%M')}  "
-          f"{dim('Rows:')} {before:,} â†’ {bright_green(str(after))}")
+    print(f"  {dim('Time filter:')} {SESSION_START.strftime('%H:%M')}  {SESSION_END.strftime('%H:%M')}  "
+          f"{dim('Rows:')} {before:,}  {bright_green(str(after))}")
 
     sides   = ["ce","pe"] if SIDE == "both" else [SIDE]
     col_map = {
@@ -1619,9 +1493,9 @@ def run_single_analysis(csv_path=None, analysis_date=None):
           f"{dim('Sides:')} {SIDE.upper()}  "
           f"{dim('OI print interval:')} {OI_PRINT_INTERVAL}  "
           f"{dim('X-candle window:')} {CROSS_CANDLES}  "
-          f"{dim('Nearby strikes:')} Â±{STRIKES_NEARBY}\n")
+          f"{dim('Nearby strikes:')} {STRIKES_NEARBY}\n")
 
-    # â”€â”€ Per-strike feature engineering â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    #  Per-strike feature engineering 
     all_strikes = sorted(df["strike"].unique())
     records     = []
 
@@ -1646,7 +1520,6 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             sdf[f"{side}_g_xpct"]  = cross_candle_pct(g, CROSS_CANDLES)
             sdf[f"{side}_v_xpct"]  = cross_candle_pct(v, CROSS_CANDLES)
             sdf[f"{side}_p_xpct"]  = cross_candle_pct(p, CROSS_CANDLES)
-            sdf[f"{side}_overextended"] = sdf[f"{side}_p_xpct"] > MAX_PRICE_XPCT
 
             sdf[f"{side}_d_trend"] = cross_candle_trend(d, CROSS_CANDLES)
             sdf[f"{side}_g_trend"] = cross_candle_trend(g, CROSS_CANDLES)
@@ -1710,18 +1583,17 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         }
 
     full       = pd.concat(records, ignore_index=True).sort_values(["timestamp","strike"])
-    full       = attach_nifty_200ma(full)
     snapshot_analysis = build_snapshot_analysis(full)
     timestamps = sorted(full["timestamp"].unique())
 
     W  = 177   # console width - wide enough for all columns plus compact snapshot analysis
     W3 = W + STRIKES_NEARBY * 14
 
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    # LAYER 1 â€” SAME-CANDLE SPIKE REPORT
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    header(f"SNAPSHOT OI BUILDUP â€” every {OI_PRINT_INTERVAL}, CE first then PE", W)
-    print(f"  {dim('Layer 1 threshold: runtime percentile â‰¥')} {bold(str(STRENGTH_PCT))}th\n")
+    # 
+    # LAYER 1  SAME-CANDLE SPIKE REPORT
+    # 
+    header(f"SNAPSHOT OI BUILDUP  every {OI_PRINT_INTERVAL}, CE first then PE", W)
+    print(f"  {dim('Layer 1 threshold: runtime percentile ')} {bold(str(STRENGTH_PCT))}th\n")
 
     print(
         f"  {dim('Also showing price-volume buildup rows: P% >=')} "
@@ -1765,7 +1637,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
                                 r[col_map[side]["price"]], r[f"{side}_p_pct"],
                                 r[col_map[side]["iv"]]))
 
-    # Same timestamp â†’ all CE first â†’ all PE next
+    # Same timestamp  all CE first  all PE next
     snapshot_rows.sort(key=lambda x: (x[0], 0 if x[3] == "ce" else 1, x[1]))
     layer1_rows.sort(key=lambda x: (x[0], 0 if x[3] == "ce" else 1, x[1]))
     entry_source_rows = layer1_rows
@@ -1802,11 +1674,11 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         print(f"  {dim('No snapshot rows found.')}")
     sep(W)
 
-    # TOP ENTRIES TABLE â€” best entry candles from Layer 1 data
+    # TOP ENTRIES TABLE  best entry candles from Layer 1 data
     # Logic: delta up + gamma up + volume up + price up
     # Extra rule: one best row per timestamp, so duplicate same-time entries are removed
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    header("TOP ENTRIES â€” Delta + Gamma + Volume + Price increasing", W)
+    # 
+    header("TOP ENTRIES  Delta + Gamma + Volume + Price increasing", W)
     pe_total = 0
     pe_strict_reject = 0
     pe_pass = 0
@@ -1859,11 +1731,6 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             bad_move, bad_time, bad_price = compute_strike_bad_move(
                 full, ts, stk, side, entry_price, col_map
             )
-            chop_score = r.get("chop_score", 0)
-            chop_score = 0 if pd.isna(chop_score) else int(chop_score)
-            ema_crosses = r.get("ema20_50_crosses", 0)
-            ema_crosses = 0 if pd.isna(ema_crosses) else int(ema_crosses)
-
             top_rows.append((
             ts, stk, spot, side,
             entry_price, exit_ts, exit_price, pnl_points,
@@ -1965,7 +1832,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
 
     if pe_rows:
         print()
-        header("PE ENTRIES ONLY â€” same format", W)
+        header("PE ENTRIES ONLY  same format", W)
         print(bold(h_top))
         sep(W)
 
@@ -2004,9 +1871,9 @@ def run_single_analysis(csv_path=None, analysis_date=None):
 
 
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # 
     # SUMMARY
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # 
     header("SUMMARY", W)
 
     option_pnls = [
@@ -2020,8 +1887,8 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     avg_option_pnl = round(total_option_pnl / len(option_pnls), 2) if option_pnls else 0.0
 
     # Summary after removing Layer 2, Layer 3, Layer 4 tables
-    print(f"  {dim('Session window              :')} {bold(SESSION_START.strftime('%H:%M'))} â€“ {bold(SESSION_END.strftime('%H:%M'))}")
-    print(f"  {dim('Layer 1 â€” Same-candle spikes:')} {bold(str(len(layer1_rows)))}")
+    print(f"  {dim('Session window              :')} {bold(SESSION_START.strftime('%H:%M'))}  {bold(SESSION_END.strftime('%H:%M'))}")
+    print(f"  {dim('Layer 1  Same-candle spikes:')} {bold(str(len(layer1_rows)))}")
     print(f"  {dim('Top entries shown           :')} {bold(str(min(len(unique_rows), TOP_N)))}")
     print(f"  {dim('Option trades total         :')} {bold(str(len(option_pnls)))}")
     print(f"  {dim('Option profit count         :')} {bold(str(profit_count))}")
@@ -2033,7 +1900,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     print(f"  {dim('Option average PNL          :')} {bold(avg_pnl_txt)}")
     print()
 
-    # â”€â”€ Save CSV â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    #  Save CSV 
     save_cols = ["timestamp","strike","spot"]
     for side in sides:
         cm = col_map[side]
@@ -2104,8 +1971,6 @@ def parse_args():
                         help="OI CSV source: back=niftyoptiondata, live=Strategy3MAGreeks\\live_Saidata_weeklyexp.")
     parser.add_argument("--csv-dir",
                         help="Folder containing weekly oi_YYYY_MM_DD.csv files. Overrides --oi-data for monthly mode.")
-    parser.add_argument("--nifty-data", "--nifty-data-mode", choices=["back", "live"], default=NIFTY_DATA_MODE,
-                        help="NIFTY Excel source for 200MA/EMA filters: back=nifty_5yr_1min.xlsx, live=nifty_live_all_timeframes.xlsx.")
     parser.add_argument("--print-interval", "--oi-print-interval", type=parse_print_interval_arg, default=OI_PRINT_INTERVAL,
                         help="Snapshot OI buildup print interval: 5min default, or 1min to print every candle.")
     parser.add_argument("--no-next-week", action="store_true",
@@ -2134,7 +1999,6 @@ def parse_args():
     return parser.parse_args()
 
 def apply_arg_config(args):
-    global NIFTY_DATA_MODE, NIFTY_1MIN_PATH, _NIFTY_200MA_CACHE
     global OI_DATA_MODE
     global OI_PRINT_INTERVAL
     global STRICT_MIN_VOLUME_PCT, STRICT_MIN_DELTA_PCT
@@ -2144,9 +2008,6 @@ def apply_arg_config(args):
 
     OI_DATA_MODE = args.oi_data
     OI_PRINT_INTERVAL = args.print_interval
-    NIFTY_DATA_MODE = args.nifty_data
-    NIFTY_1MIN_PATH = LIVE_NIFTY_1MIN_PATH if args.nifty_data == "live" else BACK_NIFTY_1MIN_PATH
-    _NIFTY_200MA_CACHE = None
 
     if args.strict_volume_pct is not None:
         STRICT_MIN_VOLUME_PCT = args.strict_volume_pct
