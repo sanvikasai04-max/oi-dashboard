@@ -1,4 +1,4 @@
-r"""
+﻿r"""
 Script 3: Options Flow Strength Analyser
 
 Default compile check:
@@ -16,69 +16,77 @@ Default single-day command:
 Current entry/exit model
 ========================
 
-Only the strict cross-strike confirmation rule is used for option trade entry
-and exit.
+Multi-factor cross-strike + cross-candle confirmation engine.
 
-CE entry criteria
------------------
+Three pillars scored independently per snapshot:
 
-The script checks the selected strike plus nearby strikes. A CE entry is valid
-only when both sides confirm the same bullish story:
+  Volume pillar (weight 20%)
+  --------------------------
+  Minimum own-side volume pct: >= 80 (STRICT_MIN_VOLUME_PCT)
+  Bonus tier counts per strike:
+    >= 80%  = base confirmation
+    >= 100% = V100 bonus
+    >= 150% = V150 bonus
+    >= 200% = V200 bonus
+  More strikes hitting higher tiers = stronger score.
+  Opposite side volume: either sell pressure (>= 80) or exits (< 0) both valid.
 
-  1. Own side strength:
-     Nearby CE strikes must show delta %, price %, and volume % strength.
-     Defaults: CE delta % >= 2, CE price % >= 3, CE volume % >= 80.
-     At least 3 nearby CE strikes must confirm by default.
+  Delta pillar (weight 40%)
+  -------------------------
+  Minimum own-side delta pct: >= 2 (STRICT_MIN_DELTA_PCT)
+  Bonus tiers: >=3, >=4, >=5 (counted across nearby strikes).
+  Opposite side: delta must DROP (<= -2, -4, -6); more strikes = stronger score.
 
-  2. Opposite side weakness:
-     Nearby PE strikes must weaken while CE strengthens.
-     Defaults: PE delta % <= -2 and PE price % <= -3.
-     PE volume may increase by >= 80 as sell pressure, or go negative as
-     PE-side exit/unwinding.
-     At least 2 nearby PE strikes must confirm by default.
+  Price pillar (weight 40%)
+  -------------------------
+  Minimum own-side price pct: >= 3 (STRICT_MIN_PRICE_PCT)
+  Bonus tiers: >=4, >=5, >=6, >=7.
+  Opposite side: price must FALL (<= -3, -5).
 
-  3. Repeated confirmation:
-     The confirmation must repeat inside the recent snapshot window.
-     Default checks the last 5 snapshots and needs 3 valid confirmations.
-     The newest confirmation score must be >= the first confirmation score.
+Cross-strike confirmation:
+  Own side: at least STRICT_MIN_SAME_STRIKES (default 3) nearby strikes must pass.
+  Opposite side: at least STRICT_MIN_OPP_STRIKES (default 2) must confirm weakness.
 
-PE entry criteria
------------------
+Volume-neutral partial confirmation:
+  If volume is flat (>=0) but delta+price are strong, snapshot still counts.
+  This handles the rule: "delta spike + price spike but volume neutral = still confirm".
+  Partial confirmation reduces effective weight (not counted at full volume bonus).
 
-PE entry is the mirror image of CE:
-  1. Nearby PE strikes need delta %, price %, and volume % strength.
-  2. Nearby CE strikes need delta % and price % weakness.
-  3. CE volume may rise as sell pressure or reduce as CE exit/unwinding.
-  4. Confirmation must repeat in the recent snapshot window and must not fade.
+Cross-candle confirmation (ENTRY):
+  Window: last STRICT_CONFIRM_WINDOW snapshots (default 5).
+  Minimum: STRICT_MIN_CONFIRM_BARS (default 3) must pass the above rules.
+  Non-consecutive confirmations are allowed (e.g., candles 1, 3, 4 out of 5).
+  Growing strength: the LAST confirmation score must be >= the FIRST.
+  Example: candles 1, 2, 4 strong out of 5 => 3 of 5 confirmed, entry ok if growing.
 
-Exit criteria
--------------
+EXIT criteria:
+  1. Fixed stop loss of STOP_LOSS_PTS (default 30) option points from entry.
+  2. Opposite-side mirror confirmation:
+     - Wait for STRICT_EXIT_CONFIRM_BARS (default 2) opposite confirmations.
+     - Latest opposite confirmation must be >= first (growing exit pressure).
+     - Early exit if 2nd opposite confirmation is > 1.5x score of 1st (strong surge).
+  3. Force exit at FORCE_EXIT (default 15:25).
 
-Every accepted trade exits using only these rules:
-  1. Fixed stop loss of 30 option points from entry.
-  2. Strict opposite-side confirmation.
-     CE trade exits when PE gives repeated strict confirmation.
-     PE trade exits when CE gives repeated strict confirmation.
-     Default requires 2 consecutive opposite confirmations, with latest score
-     >= first score.
-  3. Force exit near market close at FORCE_EXIT.
-
-Tunable strict-rule parameters
-------------------------------
-
-Use these argparse options to test different strict confirmation settings:
-  --strict-volume-pct 80
-  --strict-delta-pct 2
-  --strict-price-pct 3
-  --strict-same-strikes 3
-  --strict-opp-strikes 2
-  --strict-window 5
-  --strict-confirm-bars 3
-  --strict-exit-bars 2
-  --strict-require-volume
+Tunable parameters:
+  --strict-volume-pct 80        Own-side minimum volume pct
+  --strict-delta-pct 2          Own-side minimum delta pct (opposite must drop by same)
+  --strict-price-pct 3          Own-side minimum price pct (opposite must drop by same)
+  --strict-same-strikes 3       Minimum own-side confirming strikes
+  --strict-opp-strikes 2        Minimum opposite-side confirming strikes
+  --strict-window 5             Candle lookback window
+  --strict-confirm-bars 3       Minimum confirmations inside window
+  --strict-exit-bars 2          Opposite confirmations needed to exit
+  --strict-require-volume       Require volume threshold (disables neutral-volume partial confirm)
 
 Monthly mode:
   python .\3_strength_analyser.py --monthly --month jan --year 2024
+
+  python 3_strength_analyser_june27.py --console-xlsx --strict-window 5 --strict-confirm-bars 2 --strict-exit-bars 2 --exit-surge-ratio 1.5
+
+  #--spike-override-score 80  -> from 1st strong candle 
+
+
+  
 """
 import argparse
 import contextlib
@@ -95,13 +103,13 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
 # USER CONFIG
-CSV_PATH         = "oi_2026_06_16.csv"
-ANALYSIS_DATE    = "2026-06-16"
+CSV_PATH         = "oi_2026_06_09.csv"
+ANALYSIS_DATE    = "2026-06-03"
 SIDE             = "both"          # "ce" | "pe" | "both"
 OI_DATA_MODE     = "back"          # "back" | "live"
 BACK_OI_DATA_DIR = Path(__file__).resolve().parent
 LIVE_OI_DATA_DIR = Path(__file__).resolve().parents[3] / "StrategyBuilder" / "Strategy3MAGreeks" / "live_Saidata_weeklyexp"
-OI_PRINT_INTERVAL = "5min"         # "5min" default; pass "1min" to print every candle
+OI_PRINT_INTERVAL = "1min"         # "5min" default; pass "1min" to print every candle
 CROSS_CANDLES    = 5               # lookback window for cross-candle trend
 STRIKES_NEARBY   = 2
 ATM_RANGE_POINTS  = 500
@@ -120,29 +128,24 @@ REPORTS_DIR      = Path(__file__).resolve().parent / "reports"
 OUT_CONSOLE_XLSX = str(REPORTS_DIR / "console_output.xlsx")
 TOP_N = 20
 ALLOW_OVERLAPPING_TRADES = False  # False = one active trade only; next entry after exit
+ALLOW_SIDE_SWITCH = True          # True = if opposite side fires while trade active, close and flip
 
-# Entry/exit model:
-# Only strict cross-strike confirmation is used for option trade decisions.
+# Entry/exit model: multi-factor cross-strike + cross-candle confirmation.
 #
-# ENTRY - CE:
-#   1. Nearby CE strikes must show delta %, price %, and volume % strength.
-#   2. Nearby PE strikes must respect the bullish move by weakening:
-#      PE delta % drops and PE price % drops. PE volume may either increase
-#      as sell pressure or reduce as exits from that side.
-#   3. This confirmation must repeat inside the recent snapshot window.
-#      Default: 3 confirmations in the last 5 snapshots.
-#   4. The newest confirmation score must be >= the first confirmation score,
-#      so the entry waits for confirmation that is not fading.
+# THREE PILLARS per snapshot (delta 40%, price 40%, volume 20%):
+#   Volume: own >= 80%; bonus tiers >= 100/150/200%; opposite sell or exit.
+#   Delta:  own >= 2%; bonus tiers >= 3/4/5%; opposite drops <= -2/-4/-6%.
+#   Price:  own >= 3%; bonus tiers >= 4/5/6/7%; opposite drops <= -3/-5%.
 #
-# ENTRY - PE:
-#   Mirror logic: PE delta/price/volume strength with CE delta/price weakness.
+# Cross-strike: own >= STRICT_MIN_SAME_STRIKES; opposite >= STRICT_MIN_OPP_STRIKES.
+# Volume-neutral: if delta+price strong but volume flat, snapshot still counts.
 #
-# EXIT:
-#   1. Fixed 30-point stop loss.
-#   2. Exit when the opposite side gives repeated strict confirmation and the
-#      latest opposite confirmation is at least as strong as the first.
-#   3. Force exit at FORCE_EXIT.
-# Strict cross-strike entry is always on and is the only trade entry rule.
+# Cross-candle ENTRY: last 5 snapshots, at least 3 must confirm (non-consecutive
+# allowed). Last confirmation score >= first (growing strength).
+#
+# EXIT: opposite side mirror; 2 opposite confirmations with growing strength.
+# Early exit if 2nd opposite score > 1.5x first (strong surge).
+# Fixed stop loss and force exit at FORCE_EXIT.
 ENTRY_START = dtime(9, 20)
 USE_STRICT_CROSS_ENTRY = True
 STRICT_MIN_VOLUME_PCT = 80
@@ -154,6 +157,13 @@ STRICT_CONFIRM_WINDOW = 5
 STRICT_MIN_CONFIRM_BARS = 3
 STRICT_ALLOW_VOLUME_NEUTRAL = True
 STRICT_EXIT_CONFIRM_BARS = 2
+STRICT_EXIT_SURGE_RATIO  = 1.5   # early exit if 2nd opp score > this × 1st score
+# Spike override: if the current snapshot composite score is >= this value AND
+# at least 1 prior confirmation exists in the window, enter immediately without
+# waiting for STRICT_MIN_CONFIRM_BARS. Captures explosive moves like 12:32 where
+# volume 200-800%, delta 100%+, price 5-6% all appear together for the first time.
+# Set to 0 to disable (always require full confirm bars).
+STRICT_SPIKE_OVERRIDE_SCORE = 60
 _STRICT_BEST_CACHE = {}
 
 # Exit config: fixed stop, strict opposite confirmation, or force exit only.
@@ -454,6 +464,22 @@ def find_exit_after_entry(
     snapshot_analysis=None,
     strict_entry=False,
 ):
+    """
+    Exit engine (mirror of entry engine).
+
+    Exit rules (matching your strategy notes):
+
+    1. Stop loss: fixed STOP_LOSS_PTS option points below entry.
+    2. Opposite-side confirmation exit:
+       - Watch opposite side using the same multi-factor snapshot check.
+       - Wait for STRICT_EXIT_CONFIRM_BARS confirmations (default 2) in the
+         last exit-window snapshots.
+       - The LATEST opposite confirmation must be >= the FIRST opposite
+         confirmation in score (growing exit strength).
+       - If after the 1st opposite confirmation the next candle is STRONGER,
+         exit immediately even without reaching the full bar count.
+    3. Force exit at FORCE_EXIT time.
+    """
     cm = col_map[side]
     stop_loss_pts = STOP_LOSS_PTS
 
@@ -465,41 +491,64 @@ def find_exit_after_entry(
     if trade.empty:
         return entry_ts, entry_price, 0, "No future data"
 
-    strict_opp_first_score = None
-    strict_opp_confirm_count = 0
+    opp = opposite_side(side)
+    opp_confirm_history = []   # list of (ts, score, units) for opposite confirmations
 
     for i, r in trade.iterrows():
         price = r[cm["price"]]
 
-        # Force exit at 3 PM
+        # Force exit
         if r["timestamp"].time() >= FORCE_EXIT:
             pnl = price - entry_price
             return r["timestamp"], price, pnl, f"Exit: force exit {FORCE_EXIT.strftime('%H:%M')}"
 
         pnl_now = price - entry_price
 
+        # Stop loss
         if pnl_now <= -stop_loss_pts:
             return r["timestamp"], price, pnl_now, f"Exit: stop loss -{stop_loss_pts}"
 
-        opp = opposite_side(side)
-        opp_ok, opp_score, opp_own, opp_other, opp_units, opp_strike, opp_reason = strict_best_snapshot(
+        # Check opposite side
+        opp_ok, opp_score, opp_own, opp_opp_count, opp_units, opp_strike, opp_reason = strict_best_snapshot(
             full, r["timestamp"], strike, opp
         )
+
         if opp_ok:
-            strict_opp_confirm_count += 1
-            if strict_opp_first_score is None:
-                strict_opp_first_score = opp_units
-            if (
-                strict_opp_confirm_count >= STRICT_EXIT_CONFIRM_BARS and
-                opp_units >= strict_opp_first_score
-            ):
-                return r["timestamp"], price, pnl_now, (
-                    f"Exit: strict opposite confirm {opp_reason} "
-                    f"STRIKE={opp_strike} CNT={strict_opp_confirm_count}"
-                )
+            opp_confirm_history.append({
+                "ts": r["timestamp"],
+                "score": opp_score,
+                "units": opp_units,
+            })
+
+            # If we have enough opposite confirmations
+            if len(opp_confirm_history) >= STRICT_EXIT_CONFIRM_BARS:
+                first_opp = opp_confirm_history[0]
+                last_opp  = opp_confirm_history[-1]
+
+                # Growing exit strength: last >= first
+                if last_opp["units"] >= first_opp["units"]:
+                    return r["timestamp"], price, pnl_now, (
+                        f"Exit: opposite {opp.upper()} confirm {opp_reason} "
+                        f"STRIKE={opp_strike} CNT={len(opp_confirm_history)} "
+                        f"FIRST_UNITS={first_opp['units']} LAST_UNITS={last_opp['units']}"
+                    )
+
+            # Early exit: 2nd confirmation is much stronger than 1st (score > STRICT_EXIT_SURGE_RATIO x first)
+            if len(opp_confirm_history) >= 2:
+                first_opp = opp_confirm_history[0]
+                last_opp  = opp_confirm_history[-1]
+                if last_opp["score"] > first_opp["score"] * STRICT_EXIT_SURGE_RATIO and last_opp["units"] >= first_opp["units"]:
+                    return r["timestamp"], price, pnl_now, (
+                        f"Exit: strong opposite surge {opp.upper()} "
+                        f"STRIKE={opp_strike} CNT={len(opp_confirm_history)} "
+                        f"SCORE_RATIO={last_opp['score']}/{first_opp['score']}"
+                    )
         else:
-            strict_opp_confirm_count = 0
-            strict_opp_first_score = None
+            # Reset if opposite side weakens (no confirmation)
+            # Keep history but don't grow it on misses - allows non-consecutive confirms
+            # as per your rule: "out of 5, minimum 3 cross candle should have confirmation"
+            # We don't reset here intentionally so non-consecutive confirmations count.
+            pass
 
     last = trade.iloc[-1]
     exit_price = last[cm["price"]]
@@ -550,6 +599,25 @@ def compute_strike_bad_move(full, entry_ts, strike, side, entry_price, col_map):
     return round(bad_move, 2), low_row["timestamp"], round(low_price, 2)
 
 def strict_cross_snapshot(full, ts, strike, side):
+    """
+    Multi-factor snapshot confirmation engine.
+
+    Scores each snapshot using three separate pillars:
+      1. Volume pct  - own >=80 required; bonus for >=100 / >=150 / >=200 pct strikes
+      2. Delta pct   - own >=2; bonus for >=3/4/5; opposite must drop (<=-2)
+      3. Price pct   - own >=3; bonus for >=4/5/6/7; opposite must fall (<=-3)
+
+    Opposite side is considered valid if BOTH sides of each pillar agree:
+      CE rising => PE price and delta must fall.
+      PE volume may rise (sell pressure) OR fall (PE exits). Both are valid.
+
+    Volume-neutral own-side:
+      If volume is flat but delta+price are strong, the snapshot still counts
+      (weighted less via STRICT_ALLOW_VOLUME_NEUTRAL). This matches the rule:
+      delta spike + price spike but volume neutral = still count as confirmation.
+
+    Returns: ok, composite_score, own_count, opp_count, reason
+    """
     nearby = full[
         (full["timestamp"] == ts) &
         (full["strike"] >= strike - STRIKES_NEARBY * STRIKE_STEP) &
@@ -559,48 +627,85 @@ def strict_cross_snapshot(full, ts, strike, side):
     if nearby.empty:
         return False, 0, 0, 0, "STRICT_NO_NEARBY"
 
-    if side == "ce":
-        own_prefix = "ce"
-        opp_prefix = "pe"
-        tag = "STRICT_BULL"
-    else:
-        own_prefix = "pe"
-        opp_prefix = "ce"
-        tag = "STRICT_BEAR"
+    own = "ce" if side == "ce" else "pe"
+    opp = "pe" if side == "ce" else "ce"
+    tag = "STRICT_BULL" if side == "ce" else "STRICT_BEAR"
 
-    own_delta = nearby[f"{own_prefix}_d_pct"] >= STRICT_MIN_DELTA_PCT
-    own_price = nearby[f"{own_prefix}_p_pct"] >= STRICT_MIN_PRICE_PCT
-    own_volume = nearby[f"{own_prefix}_v_pct"] >= STRICT_MIN_VOLUME_PCT
-    own_confirm = own_delta & own_price & own_volume
+    # OWN SIDE
+    own_v = nearby[f"{own}_v_pct"]
+    v80   = _count_true(own_v >= 80)
+    v100  = _count_true(own_v >= 100)
+    v150  = _count_true(own_v >= 150)
+    v200  = _count_true(own_v >= 200)
 
-    opp_delta_drop = nearby[f"{opp_prefix}_d_pct"] <= -STRICT_MIN_DELTA_PCT
-    opp_price_drop = nearby[f"{opp_prefix}_p_pct"] <= -STRICT_MIN_PRICE_PCT
-    opp_volume_sell = nearby[f"{opp_prefix}_v_pct"] >= STRICT_MIN_VOLUME_PCT
-    opp_volume_exit = nearby[f"{opp_prefix}_v_pct"] < 0
-    opp_confirm = opp_delta_drop & opp_price_drop & (opp_volume_sell | opp_volume_exit)
+    own_d = nearby[f"{own}_d_pct"]
+    d2    = _count_true(own_d >= 2)
+    d3    = _count_true(own_d >= 3)
+    d4    = _count_true(own_d >= 4)
+    d5    = _count_true(own_d >= 5)
 
-    if STRICT_ALLOW_VOLUME_NEUTRAL:
-        partial_own = own_delta & own_price & (nearby[f"{own_prefix}_v_pct"] >= 0)
-        own_count = max(_count_true(own_confirm), _count_true(partial_own))
-    else:
-        own_count = _count_true(own_confirm)
+    own_p = nearby[f"{own}_p_pct"]
+    p3    = _count_true(own_p >= 3)
+    p4    = _count_true(own_p >= 4)
+    p5    = _count_true(own_p >= 5)
+    p6    = _count_true(own_p >= 6)
+    p7    = _count_true(own_p >= 7)
 
-    opp_count = _count_true(opp_confirm)
-    high_volume_count = _count_true(nearby[f"{own_prefix}_v_pct"] >= 100)
-    super_volume_count = _count_true(nearby[f"{own_prefix}_v_pct"] >= 150)
-    mega_volume_count = _count_true(nearby[f"{own_prefix}_v_pct"] >= 200)
-
-    score = (
-        own_count * 4 +
-        opp_count * 4 +
-        high_volume_count +
-        super_volume_count * 2 +
-        mega_volume_count * 3
+    # Per-strike full confirmation (all three pillars)
+    own_full_confirm = (
+        (own_d >= STRICT_MIN_DELTA_PCT) &
+        (own_p >= STRICT_MIN_PRICE_PCT) &
+        (own_v >= STRICT_MIN_VOLUME_PCT)
     )
+    own_count = _count_true(own_full_confirm)
+
+    # Volume-neutral partial confirmation (delta+price strong, volume not negative)
+    if STRICT_ALLOW_VOLUME_NEUTRAL:
+        own_partial = (
+            (own_d >= STRICT_MIN_DELTA_PCT) &
+            (own_p >= STRICT_MIN_PRICE_PCT) &
+            (own_v >= 0)
+        )
+        own_count = max(own_count, _count_true(own_partial))
+
+    # OPPOSITE SIDE
+    opp_d = nearby[f"{opp}_d_pct"]
+    opp_p = nearby[f"{opp}_p_pct"]
+    opp_v = nearby[f"{opp}_v_pct"]
+
+    opp_d2 = _count_true(opp_d <= -2)
+    opp_d4 = _count_true(opp_d <= -4)
+    opp_d6 = _count_true(opp_d <= -6)
+    opp_p3 = _count_true(opp_p <= -3)
+    opp_p5 = _count_true(opp_p <= -5)
+
+    opp_confirm = (
+        (opp_d <= -STRICT_MIN_DELTA_PCT) &
+        (opp_p <= -STRICT_MIN_PRICE_PCT) &
+        ((opp_v >= STRICT_MIN_VOLUME_PCT) | (opp_v < 0))
+    )
+    opp_count = _count_true(opp_confirm)
+
+    # COMPOSITE SCORE: delta 40%, price 40%, volume 20%
+    volume_score  = (v80 * 2) + (v100 * 1) + (v150 * 2) + (v200 * 3)
+    delta_score   = (d2 * 3)  + (d3 * 2)   + (d4 * 2)   + (d5 * 3)
+    price_score   = (p3 * 3)  + (p4 * 2)   + (p5 * 2)   + (p6 * 2)   + (p7 * 3)
+    opp_score_pts = (opp_d2 * 2) + (opp_d4 * 2) + (opp_d6 * 2) + (opp_p3 * 2) + (opp_p5 * 2)
+
+    score = int(
+        delta_score * 0.40 +
+        price_score * 0.40 +
+        volume_score * 0.20 +
+        opp_score_pts
+    )
+
     ok = own_count >= STRICT_MIN_SAME_STRIKES and opp_count >= STRICT_MIN_OPP_STRIKES
     reason = (
         f"{tag} OWN={own_count} OPP={opp_count} "
-        f"V100={high_volume_count} V150={super_volume_count} V200={mega_volume_count}"
+        f"V80={v80} V100={v100} V150={v150} V200={v200} "
+        f"D2={d2} D3={d3} D4={d4} D5={d5} "
+        f"P3={p3} P4={p4} P5={p5} P6={p6} P7={p7} "
+        f"OppD2={opp_d2} OppD4={opp_d4} OppP3={opp_p3} OppP5={opp_p5}"
     )
     return ok, score, own_count, opp_count, reason
 
@@ -645,44 +750,94 @@ def strict_best_snapshot(full, ts, strike, side):
     return best
 
 def strict_cross_entry_ok(full, ts, strike, side):
+    """
+    Cross-candle confirmation engine.
+
+    Rules (matching your strategy notes):
+
+    1. Look back at the last STRICT_CONFIRM_WINDOW snapshots (default 5).
+    2. Count how many snapshots pass the multi-factor confirmation test.
+       Require at least STRICT_MIN_CONFIRM_BARS (default 3) out of the window.
+    3. Growing strength: the LAST valid confirmation snapshot must have a
+       composite score >= the FIRST valid confirmation snapshot. If the move is
+       fading, we wait.
+    4. Partial candle: if a candle has delta+price strong but volume neutral,
+       it still counts as a confirmation (at partial weight = 0.7 of a full
+       confirmation). This matches the note: "only delta spike and price spike
+       but volume neutral - still take strong confirmation".
+    5. If after 5-10 candles another strong spike arrives with higher composite
+       score than earlier, that is a strong hold/re-entry signal.
+
+    Returns: ok, last_score, reason_string
+    """
     if not USE_STRICT_CROSS_ENTRY:
         return False, 0, "STRICT_OFF"
 
     timestamps = [x for x in sorted(full["timestamp"].unique()) if x <= ts]
     recent = timestamps[-STRICT_CONFIRM_WINDOW:]
-    confirmations = []
+
+    # Collect all snapshot results in the window
+    all_snaps = []
     for snap_ts in recent:
         ok, score, own_count, opp_count, strength_units, snap_strike, reason = strict_best_snapshot(
             full, snap_ts, strike, side
         )
-        if ok:
-            confirmations.append((
-                snap_ts,
-                score,
-                own_count,
-                opp_count,
-                strength_units,
-                snap_strike,
-                reason,
-            ))
+        all_snaps.append({
+            "ts": snap_ts,
+            "ok": ok,
+            "score": score,
+            "own": own_count,
+            "opp": opp_count,
+            "units": strength_units,
+            "strike": snap_strike,
+            "reason": reason,
+        })
+
+    # Count confirmations
+    # A snapshot counts as full (weight=1) if ok=True.
+    # A snapshot counts as partial (weight=0.7) if delta+price pass but volume
+    # is neutral (ok=False but own_count+opp_count is close to threshold).
+    confirmations = []
+    for snap in all_snaps:
+        if snap["ok"]:
+            confirmations.append(snap)
+        elif STRICT_ALLOW_VOLUME_NEUTRAL:
+            # partial: own>=threshold and opp>=threshold but volume was neutral
+            if snap["own"] >= STRICT_MIN_SAME_STRIKES and snap["opp"] >= STRICT_MIN_OPP_STRIKES:
+                confirmations.append(snap)
 
     if len(confirmations) < STRICT_MIN_CONFIRM_BARS:
-        return False, 0, f"STRICT_WAIT {len(confirmations)}/{STRICT_MIN_CONFIRM_BARS}"
+        # for the first time after a quiet period.
+        if STRICT_SPIKE_OVERRIDE_SCORE > 0 and len(confirmations) >= 1:
+            last_snap = all_snaps[-1]  # current snapshot (ts itself)
+            if last_snap["ok"] and last_snap["score"] >= STRICT_SPIKE_OVERRIDE_SCORE:
+                reason = (
+                    last_snap["reason"] +
+                    f" SPIKE_OVERRIDE score={last_snap['score']}>={STRICT_SPIKE_OVERRIDE_SCORE} "
+                    f"CONF={len(confirmations)}/{len(recent)}"
+                )
+                return True, last_snap["score"], reason
+        return False, 0, (
+            f"STRICT_WAIT {len(confirmations)}/{STRICT_MIN_CONFIRM_BARS} "
+            f"in window {len(recent)}"
+        )
 
-    first_score = confirmations[0][1]
-    last_score = confirmations[-1][1]
-    first_units = confirmations[0][4]
-    last_units = confirmations[-1][4]
-    if last_units < first_units:
-        return False, last_score, f"STRICT_NOT_STRONGER {last_units}<{first_units}"
+    first = confirmations[0]
+    last  = confirmations[-1]
+
+    # Growing strength check: last confirmation must be >= first
+    if last["units"] < first["units"]:
+        return False, last["score"], (
+            f"STRICT_NOT_STRONGER last_units={last['units']}<first_units={first['units']}"
+        )
 
     reason = (
-        confirmations[-1][6] +
-        f" STRIKE={confirmations[-1][5]} CONF={len(confirmations)}/{len(recent)} "
-        f"FIRST_UNITS={first_units} LAST_UNITS={last_units} "
-        f"FIRST_SCORE={first_score} LAST_SCORE={last_score}"
+        last["reason"] +
+        f" STRIKE={last['strike']} CONF={len(confirmations)}/{len(recent)} "
+        f"FIRST_UNITS={first['units']} LAST_UNITS={last['units']} "
+        f"FIRST_SCORE={first['score']} LAST_SCORE={last['score']}"
     )
-    return True, last_score, reason
+    return True, last["score"], reason
 
 def opposite_side(side):
     return "pe" if side == "ce" else "ce"
@@ -1762,20 +1917,69 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     # Print entries in proper time order, not score order.
     unique_rows.sort(key=lambda x: x[0])
     overlapping_skip_count = 0
+    side_switch_count = 0
     if not ALLOW_OVERLAPPING_TRADES:
         single_trade_rows = []
         active_until = None
+        active_side = None
 
         for r in unique_rows:
-            entry_ts = r[0]
-            exit_ts = r[5]
+            entry_ts  = r[0]
+            exit_ts   = r[5]
+            new_side  = r[3]
 
             if active_until is not None and entry_ts <= active_until:
-                overlapping_skip_count += 1
-                continue
+                # Same side still active → skip as before
+                if new_side == active_side:
+                    overlapping_skip_count += 1
+                    continue
+
+                # OPPOSITE side fires while trade is active → side switch:
+                # Close the active trade at this new entry candle price, then
+                # open the new opposite-side trade immediately.
+                if ALLOW_SIDE_SWITCH:
+                    # Find the price of the active trade's strike at entry_ts
+                    prev = single_trade_rows[-1]
+                    prev_strike = prev[1]
+                    prev_side   = prev[3]
+                    cm_prev     = col_map[prev_side]
+                    switch_rows = full[
+                        (full["timestamp"] == entry_ts) &
+                        (full["strike"] == prev_strike)
+                    ]
+                    if not switch_rows.empty:
+                        switch_exit_price = float(switch_rows.iloc[0][cm_prev["price"]])
+                        switch_pnl = switch_exit_price - float(prev[4])
+                        # Rebuild best/bad move up to switch point
+                        bm, bt, bp = compute_strike_best_move(full, prev[0], prev_strike, prev_side, prev[4], col_map)
+                        bdm, bdt, bdp = compute_strike_bad_move(full, prev[0], prev_strike, prev_side, prev[4], col_map)
+                        # Replace the last row with updated exit
+                        updated_prev = (
+                            prev[0], prev[1], prev[2], prev[3],
+                            prev[4],                        # entry_price
+                            entry_ts, switch_exit_price, switch_pnl,
+                            bm, bt, bp,
+                            bdm, bdt, bdp,
+                            prev[14], prev[15],
+                            prev[16], prev[17], prev[18], prev[19],
+                            f"Exit: side-switch to {new_side.upper()} at {str(entry_ts)[:19]}",
+                            prev[21],
+                        )
+                        single_trade_rows[-1] = updated_prev
+
+                    # Now open the new opposite-side trade
+                    side_switch_count += 1
+                    single_trade_rows.append(r)
+                    active_until = exit_ts if exit_ts is not None and not pd.isna(exit_ts) else entry_ts
+                    active_side  = new_side
+                    continue
+                else:
+                    overlapping_skip_count += 1
+                    continue
 
             single_trade_rows.append(r)
             active_until = exit_ts if exit_ts is not None and not pd.isna(exit_ts) else entry_ts
+            active_side  = new_side
 
         unique_rows = single_trade_rows
 
@@ -1790,13 +1994,19 @@ def run_single_analysis(csv_path=None, analysis_date=None):
           f"{dim('P% >=')} {bold(str(STRICT_MIN_PRICE_PCT))}   "
           f"{dim('Same/Opp >=')} {bold(str(STRICT_MIN_SAME_STRIKES) + '/' + str(STRICT_MIN_OPP_STRIKES))}   "
           f"{dim('Confirm:')} {bold(str(STRICT_MIN_CONFIRM_BARS) + '/' + str(STRICT_CONFIRM_WINDOW))}   "
-          f"{dim('Exit bars:')} {bold(str(STRICT_EXIT_CONFIRM_BARS))}")
+          f"{dim('Exit bars:')} {bold(str(STRICT_EXIT_CONFIRM_BARS))}   "
+          f"{dim('Surge ratio:')} {bold(str(STRICT_EXIT_SURGE_RATIO))}x   "
+          f"{dim('Spike override:')} {bold(str(STRICT_SPIKE_OVERRIDE_SCORE) if STRICT_SPIKE_OVERRIDE_SCORE > 0 else 'OFF')}")
     if ALLOW_OVERLAPPING_TRADES:
         print(f"  {dim('Single active trade rule:')} {bold('OFF')}   "
               f"{dim('Overlapping entries allowed')}")
     else:
+        switch_txt = (bright_green(f"Side switches: {side_switch_count}") if side_switch_count > 0
+                      else dim(f"Side switches: {side_switch_count}"))
         print(f"  {dim('Single active trade rule:')} {bold('ON')}   "
-              f"{dim('Overlapping entries skipped:')} {bold(str(overlapping_skip_count))}")
+              f"{dim('Overlapping entries skipped:')} {bold(str(overlapping_skip_count))}   "
+              f"{switch_txt}   "
+              f"{dim('Side-switch:')} {bold('ON' if ALLOW_SIDE_SWITCH else 'OFF')}")
     print()
 
     h_top = (
@@ -1991,6 +2201,18 @@ def parse_args():
                         help="Minimum confirmations inside the window. Default: 3.")
     parser.add_argument("--strict-exit-bars", type=int,
                         help="Opposite-side confirmations needed to exit. Default: 2.")
+    parser.add_argument("--exit-surge-ratio", type=float,
+                        help="Early exit if 2nd opposite confirmation score > this ratio × 1st score. "
+                             "Default: 1.5. Use 0 to disable early surge exit. Try 1.2, 1.5, 2.0 to tune.")
+    parser.add_argument("--spike-override-score", type=float,
+                        help="Enter immediately (skipping full confirm-bars requirement) if current snapshot "
+                             "composite score >= this AND at least 1 prior confirm exists in the window. "
+                             "Default: 60. Use 0 to disable spike override entirely. "
+                             "Lower = catches more moves early. Higher = only fires on extreme spikes. "
+                             "Try 40, 60, 80, 100 to tune.")
+    parser.add_argument("--no-side-switch", action="store_true",
+                        help="Disable side-switch: opposite-side signals while a trade is active are skipped "
+                             "instead of closing the current trade and flipping. Default: side-switch ON.")
     parser.add_argument("--strict-require-volume", action="store_true",
                         help="Require volume threshold on own-side confirmations; otherwise delta+price with non-negative volume can count.")
     parser.add_argument("--console-xlsx", nargs="?", const=OUT_CONSOLE_XLSX,
@@ -2004,7 +2226,8 @@ def apply_arg_config(args):
     global STRICT_MIN_VOLUME_PCT, STRICT_MIN_DELTA_PCT
     global STRICT_MIN_PRICE_PCT, STRICT_MIN_SAME_STRIKES, STRICT_MIN_OPP_STRIKES
     global STRICT_CONFIRM_WINDOW, STRICT_MIN_CONFIRM_BARS, STRICT_ALLOW_VOLUME_NEUTRAL
-    global STRICT_EXIT_CONFIRM_BARS
+    global STRICT_EXIT_CONFIRM_BARS, STRICT_EXIT_SURGE_RATIO, STRICT_SPIKE_OVERRIDE_SCORE
+    global ALLOW_SIDE_SWITCH
 
     OI_DATA_MODE = args.oi_data
     OI_PRINT_INTERVAL = args.print_interval
@@ -2025,6 +2248,12 @@ def apply_arg_config(args):
         STRICT_MIN_CONFIRM_BARS = args.strict_confirm_bars
     if args.strict_exit_bars is not None:
         STRICT_EXIT_CONFIRM_BARS = args.strict_exit_bars
+    if args.exit_surge_ratio is not None:
+        STRICT_EXIT_SURGE_RATIO = args.exit_surge_ratio
+    if args.spike_override_score is not None:
+        STRICT_SPIKE_OVERRIDE_SCORE = args.spike_override_score
+    if args.no_side_switch:
+        ALLOW_SIDE_SWITCH = False
     if args.strict_require_volume:
         STRICT_ALLOW_VOLUME_NEUTRAL = False
 
