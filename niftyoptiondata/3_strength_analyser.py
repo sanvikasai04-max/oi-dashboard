@@ -25,7 +25,7 @@ RUN MODES / COMMANDS
      Command:
        python 3_strength_analyser.py
 
-       python 3_strength_analyser.py --csv oi_2024_12_31.csv --date 2024-12-31 --console-xlsx oi_2024_12_31_console.xlsx
+       python 3_strength_analyser.py --csv oi_2024_12_31.csv --date 2024-12-31 --console-xlsx
 
      What it does:
        - Uses hardcoded CSV_PATH and ANALYSIS_DATE from USER CONFIG below.
@@ -291,6 +291,10 @@ python 3_strength_analyser.py --nifty-data back
 # Live data
 python 3_strength_analyser.py --nifty-data live
 
+python 3_strength_analyser.py --console-xlsx 2026-06-16_5mins.xlsx
+python 3_strength_analyser.py --print-interval 1min --console-xlsx 2026-06-16_1mins.xlsx
+
+
 python 3_strength_analyser.py --oi-data live --nifty-data live --csv oi_live_2026_06_30.csv --date 2026-06-24 --print-interval 1min
 
 python 3_strength_analyser.py --oi-data live --nifty-data live --csv oi_live_2026_06_30.csv --date 2026-06-24 --print-interval 5min
@@ -314,8 +318,8 @@ for _stream in (sys.stdout, sys.stderr):
 # ══════════════════════════════════════════════════════════════════════════════
 # USER CONFIG
 # ══════════════════════════════════════════════════════════════════════════════
-CSV_PATH         = "oi_2024_12_31.csv"
-ANALYSIS_DATE    = "2024-12-31"
+CSV_PATH         = "oi_2026_06_16.csv"
+ANALYSIS_DATE    = "2026-06-16"
 SIDE             = "both"          # "ce" | "pe" | "both"
 OI_DATA_MODE     = "back"          # "back" | "live"
 BACK_OI_DATA_DIR = Path(__file__).resolve().parent
