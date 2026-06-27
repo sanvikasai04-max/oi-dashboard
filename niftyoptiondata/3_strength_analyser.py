@@ -110,8 +110,8 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
 # USER CONFIG
-CSV_PATH         = "oi_2026_06_16.csv"
-ANALYSIS_DATE    = "2026-06-12"
+CSV_PATH         = "oi_2026_06_30.csv"
+ANALYSIS_DATE    = "2026-06-24"
 SIDE             = "both"          # "ce" | "pe" | "both"
 OI_DATA_MODE     = "back"          # "back" | "live"
 BACK_OI_DATA_DIR = Path(__file__).resolve().parent
@@ -244,7 +244,7 @@ def ljust(s, w):
 
 def color_pct(val, extreme=20.0):
     if pd.isna(val): return dim("    n/a ")
-    sign = "^" if val > 0 else "v" if val < 0 else " "
+    sign = "▲" if val > 0 else "▼" if val < 0 else " "
     txt  = f"{sign}{abs(val):6.2f}%"
     if val > extreme:    return bright_green(txt)
     elif val > 0:        return green(txt)
@@ -1421,7 +1421,7 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
         """Return (text_str, hex_color) for a pct value."""
         if val is None or (isinstance(val, float) and np.isnan(val)):
             return "n/a", C_DIM
-        sign = "^" if val > 0 else "v" if val < 0 else " "
+        sign = "▲" if val > 0 else "▼" if val < 0 else " "
         txt  = f"{sign}{abs(val):.2f}%"
         if val > extreme:    clr = C_BRIGHT_GREEN
         elif val > 0:        clr = C_GREEN
