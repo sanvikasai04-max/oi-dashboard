@@ -77,6 +77,13 @@ Tunable parameters:
   --strict-confirm-bars 3       Minimum confirmations inside window
   --strict-exit-bars 2          Opposite confirmations needed to exit
   --strict-require-volume       Require volume threshold (disables neutral-volume partial confirm)
+  --spike-override-score 60     Min composite score for spike override (0 = disable)
+  --spike-min-v80 4             Spike guard: V80 count >= this (blocks delta noise) [Jun-27]
+  --spike-min-p5 3              Spike guard: own P5 count >= this (genuine price momentum) [Jun-27]
+  --spike-min-opp-p5 3          Spike guard: opposite OppP5 count >= this (cross-side confirm) [Jun-27]
+  --spike-min-d4 3              Spike depth guard: D4>=3 OR P6>=2 (move not exhausted) [Jun-03]
+  --spike-min-p6 2              Spike depth guard: P6>=2 OR D4>=3 (price still has room) [Jun-03]
+  --spike-override-min-time 09:45  No spike overrides before this time (session open) [Jun-03]
 
 Monthly mode:
   python .\3_strength_analyser.py --monthly --month jan --year 2024
@@ -103,8 +110,8 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
 # USER CONFIG
-CSV_PATH         = "oi_2026_06_09.csv"
-ANALYSIS_DATE    = "2026-06-03"
+CSV_PATH         = "oi_2026_06_16.csv"
+ANALYSIS_DATE    = "2026-06-12"
 SIDE             = "both"          # "ce" | "pe" | "both"
 OI_DATA_MODE     = "back"          # "back" | "live"
 BACK_OI_DATA_DIR = Path(__file__).resolve().parent
@@ -164,6 +171,28 @@ STRICT_EXIT_SURGE_RATIO  = 1.5   # early exit if 2nd opp score > this × 1st sco
 # volume 200-800%, delta 100%+, price 5-6% all appear together for the first time.
 # Set to 0 to disable (always require full confirm bars).
 STRICT_SPIKE_OVERRIDE_SCORE = 60
+# Quality guards for SPIKE_OVERRIDE path.
+# A spike that clears the score threshold but fails any of these three checks
+# is blocked because it is delta/price noise without real volume or cross-side
+# confirmation. Values derived from Jun-27 bad-entry analysis:
+#   V80  >= 4  blocks every bad entry (13:00 had V80=0, 14:25 had V80=1, etc.)
+#   P5   >= 3  price >= 5% must appear on 3+ nearby strikes
+#   OppP5 >= 3 opposite side must also show >=5% drop on 3+ strikes
+STRICT_SPIKE_MIN_V80   = 4   # volume >= 80% on at least this many nearby strikes
+STRICT_SPIKE_MIN_P5    = 3   # own price >= 5% on at least this many nearby strikes
+STRICT_SPIKE_MIN_OPP_P5 = 3  # opposite price <= -5% on at least this many nearby strikes
+# Depth guard (Jun-03 fix): move must not already be exhausted at entry.
+# D4>=3 means delta >=4% is sustaining across 3+ strikes (not just surface burst).
+# P6>=2 means price is building to 6%+ on 2+ strikes (room to run further).
+# EITHER condition is sufficient — only block if BOTH are missing.
+STRICT_SPIKE_MIN_D4    = 3   # delta >= 4% on at least this many strikes (OR P6 check)
+STRICT_SPIKE_MIN_P6    = 2   # price >= 6% on at least this many strikes (OR D4 check)
+# Session open guard (Jun-03 fix): no spike overrides in first N minutes.
+# At session open there are no prior candles to validate the move — all "CONF=1"
+# entries at open are inherently blind. 09:32 example: V80=0 but D5=5 — looked
+# explosive but had no trend context. Time = 09:45 gives 25 minutes of context.
+# Set to None to disable (allow spike overrides from session start).
+STRICT_SPIKE_OVERRIDE_MIN_TIME = dtime(9, 45)  # no spike overrides before this time
 _STRICT_BEST_CACHE = {}
 
 # Exit config: fixed stop, strict opposite confirmation, or force exit only.
@@ -509,7 +538,7 @@ def find_exit_after_entry(
             return r["timestamp"], price, pnl_now, f"Exit: stop loss -{stop_loss_pts}"
 
         # Check opposite side
-        opp_ok, opp_score, opp_own, opp_opp_count, opp_units, opp_strike, opp_reason = strict_best_snapshot(
+        opp_ok, opp_score, opp_own, opp_opp_count, opp_units, opp_strike, opp_reason, _opp_extras = strict_best_snapshot(
             full, r["timestamp"], strike, opp
         )
 
@@ -679,10 +708,20 @@ def strict_cross_snapshot(full, ts, strike, side):
     opp_p3 = _count_true(opp_p <= -3)
     opp_p5 = _count_true(opp_p <= -5)
 
+    # Opposite side confirm: three valid patterns of weakness
+    #   1. Active selling:   opp_v >= 80%  + delta down + price down
+    #   2. Clean exits:      opp_v < 0     + delta down + price down
+    #   3. Slow unwind:      0 <= opp_v < 80 + delta down + price down <= -5%
+    #      (Jun-12 fix: PE slowly unwinding shows v=10-15%, p=-4 to -5%;
+    #       previously rejected because v was neither >= 80 nor < 0)
     opp_confirm = (
         (opp_d <= -STRICT_MIN_DELTA_PCT) &
         (opp_p <= -STRICT_MIN_PRICE_PCT) &
-        ((opp_v >= STRICT_MIN_VOLUME_PCT) | (opp_v < 0))
+        (
+            (opp_v >= STRICT_MIN_VOLUME_PCT) |          # pattern 1: active sell
+            (opp_v < 0) |                               # pattern 2: exits
+            ((opp_v >= 0) & (opp_p <= -5))             # pattern 3: slow unwind
+        )
     )
     opp_count = _count_true(opp_confirm)
 
@@ -707,7 +746,9 @@ def strict_cross_snapshot(full, ts, strike, side):
         f"P3={p3} P4={p4} P5={p5} P6={p6} P7={p7} "
         f"OppD2={opp_d2} OppD4={opp_d4} OppP3={opp_p3} OppP5={opp_p5}"
     )
-    return ok, score, own_count, opp_count, reason
+    # Extra quality metrics returned for spike-override quality checks
+    extras = {"v80": v80, "p5": p5, "opp_p5": opp_p5, "d4": d4, "p6": p6}
+    return ok, score, own_count, opp_count, reason, extras
 
 def strict_candidate_strikes(full, ts, strike):
     nearby = full[
@@ -725,7 +766,7 @@ def strict_best_snapshot(full, ts, strike, side):
 
     best = None
     for candidate_strike in strict_candidate_strikes(full, ts, strike):
-        ok, score, own_count, opp_count, reason = strict_cross_snapshot(
+        ok, score, own_count, opp_count, reason, extras = strict_cross_snapshot(
             full, ts, candidate_strike, side
         )
         strength_units = own_count + opp_count
@@ -737,6 +778,7 @@ def strict_best_snapshot(full, ts, strike, side):
             strength_units,
             candidate_strike,
             reason,
+            extras,
         )
         if best is None:
             best = candidate
@@ -745,7 +787,7 @@ def strict_best_snapshot(full, ts, strike, side):
             best = candidate
 
     if best is None:
-        best = (False, 0, 0, 0, 0, strike, "STRICT_NO_NEARBY")
+        best = (False, 0, 0, 0, 0, strike, "STRICT_NO_NEARBY", {})
     _STRICT_BEST_CACHE[cache_key] = best
     return best
 
@@ -779,7 +821,7 @@ def strict_cross_entry_ok(full, ts, strike, side):
     # Collect all snapshot results in the window
     all_snaps = []
     for snap_ts in recent:
-        ok, score, own_count, opp_count, strength_units, snap_strike, reason = strict_best_snapshot(
+        ok, score, own_count, opp_count, strength_units, snap_strike, reason, extras = strict_best_snapshot(
             full, snap_ts, strike, side
         )
         all_snaps.append({
@@ -791,6 +833,7 @@ def strict_cross_entry_ok(full, ts, strike, side):
             "units": strength_units,
             "strike": snap_strike,
             "reason": reason,
+            "extras": extras,
         })
 
     # Count confirmations
@@ -807,16 +850,71 @@ def strict_cross_entry_ok(full, ts, strike, side):
                 confirmations.append(snap)
 
     if len(confirmations) < STRICT_MIN_CONFIRM_BARS:
-        # for the first time after a quiet period.
+        # Spike override: single explosive candle allowed entry only when ALL guards pass.
+        #
+        # Guard set (accumulative — each one derived from a real bad-entry day):
+        #   [Jun-27 guards]
+        #   V80 >= 4    – volume confirming on 4+ nearby strikes (not delta noise)
+        #   P5  >= 3    – price >= 5% on 3+ nearby strikes (genuine momentum)
+        #   OppP5 >= 3  – opposite price <= -5% on 3+ strikes (cross-side confirm)
+        #   [Jun-03 guards]
+        #   D4>=3 OR P6>=2 – depth guard: move not already exhausted at entry
+        #   ts >= STRICT_SPIKE_OVERRIDE_MIN_TIME – no spike overrides at session open
         if STRICT_SPIKE_OVERRIDE_SCORE > 0 and len(confirmations) >= 1:
             last_snap = all_snaps[-1]  # current snapshot (ts itself)
             if last_snap["ok"] and last_snap["score"] >= STRICT_SPIKE_OVERRIDE_SCORE:
-                reason = (
-                    last_snap["reason"] +
-                    f" SPIKE_OVERRIDE score={last_snap['score']}>={STRICT_SPIKE_OVERRIDE_SCORE} "
-                    f"CONF={len(confirmations)}/{len(recent)}"
-                )
-                return True, last_snap["score"], reason
+                ex = last_snap.get("extras", {})
+                blocked_by = []
+
+                # Guard A: volume
+                v80_ok = ex.get("v80", 0) >= STRICT_SPIKE_MIN_V80
+                if not v80_ok:
+                    blocked_by.append(f"V80={ex.get('v80',0)}<{STRICT_SPIKE_MIN_V80}")
+
+                # Guard B: own price depth surface
+                p5_ok = ex.get("p5", 0) >= STRICT_SPIKE_MIN_P5
+                if not p5_ok:
+                    blocked_by.append(f"P5={ex.get('p5',0)}<{STRICT_SPIKE_MIN_P5}")
+
+                # Guard C: opposite price confirmation
+                opp_p5_ok = ex.get("opp_p5", 0) >= STRICT_SPIKE_MIN_OPP_P5
+                if not opp_p5_ok:
+                    blocked_by.append(f"OppP5={ex.get('opp_p5',0)}<{STRICT_SPIKE_MIN_OPP_P5}")
+
+                # Guard D: depth — move must still have room (D4>=3 OR P6>=2)
+                d4_val = ex.get("d4", 0)
+                p6_val = ex.get("p6", 0)
+                depth_ok = (d4_val >= STRICT_SPIKE_MIN_D4) or (p6_val >= STRICT_SPIKE_MIN_P6)
+                if not depth_ok:
+                    blocked_by.append(
+                        f"DEPTH(D4={d4_val}<{STRICT_SPIKE_MIN_D4} AND P6={p6_val}<{STRICT_SPIKE_MIN_P6})"
+                    )
+
+                # Guard E: no spike overrides at session open (no trend context yet)
+                time_ok = True
+                if STRICT_SPIKE_OVERRIDE_MIN_TIME is not None:
+                    time_ok = ts.time() >= STRICT_SPIKE_OVERRIDE_MIN_TIME
+                    if not time_ok:
+                        blocked_by.append(
+                            f"EARLY_SESSION({ts.strftime('%H:%M')}<{STRICT_SPIKE_OVERRIDE_MIN_TIME.strftime('%H:%M')})"
+                        )
+
+                if not blocked_by:
+                    reason = (
+                        last_snap["reason"] +
+                        f" SPIKE_OVERRIDE score={last_snap['score']}>={STRICT_SPIKE_OVERRIDE_SCORE} "
+                        f"CONF={len(confirmations)}/{len(recent)} "
+                        f"V80={ex.get('v80',0)}>={STRICT_SPIKE_MIN_V80} "
+                        f"P5={ex.get('p5',0)}>={STRICT_SPIKE_MIN_P5} "
+                        f"OppP5={ex.get('opp_p5',0)}>={STRICT_SPIKE_MIN_OPP_P5} "
+                        f"D4={d4_val} P6={p6_val}"
+                    )
+                    return True, last_snap["score"], reason
+                else:
+                    return False, 0, (
+                        f"SPIKE_OVERRIDE_BLOCKED ({', '.join(blocked_by)}) "
+                        f"score={last_snap['score']} CONF={len(confirmations)}/{len(recent)}"
+                    )
         return False, 0, (
             f"STRICT_WAIT {len(confirmations)}/{STRICT_MIN_CONFIRM_BARS} "
             f"in window {len(recent)}"
@@ -2210,6 +2308,32 @@ def parse_args():
                              "Default: 60. Use 0 to disable spike override entirely. "
                              "Lower = catches more moves early. Higher = only fires on extreme spikes. "
                              "Try 40, 60, 80, 100 to tune.")
+    parser.add_argument("--spike-min-v80", type=int, default=None,
+                        help="Spike override quality guard: own-side V80 count must be >= this. "
+                             "Default: 4. Blocks low-volume delta noise from triggering overrides. "
+                             "Use 0 to disable this guard.")
+    parser.add_argument("--spike-min-p5", type=int, default=None,
+                        help="Spike override quality guard: own-side P5 count (price >= 5%%) must be >= this. "
+                             "Default: 3. Ensures price momentum is genuine across strikes. "
+                             "Use 0 to disable this guard.")
+    parser.add_argument("--spike-min-opp-p5", type=int, default=None,
+                        help="Spike override quality guard: opposite-side OppP5 count (price <= -5%%) must be >= this. "
+                             "Default: 3. Requires cross-side confirmation, not just own-side strength. "
+                             "Use 0 to disable this guard.")
+    parser.add_argument("--spike-min-d4", type=int, default=None,
+                        help="Spike override depth guard: own-side D4 count (delta >= 4%%) must be >= this, "
+                             "OR --spike-min-p6 must also pass (either is sufficient). "
+                             "Default: 3. Blocks entries where delta move is already exhausted. "
+                             "Use 0 to disable D4 side of depth guard.")
+    parser.add_argument("--spike-min-p6", type=int, default=None,
+                        help="Spike override depth guard: own-side P6 count (price >= 6%%) must be >= this, "
+                             "OR --spike-min-d4 must also pass (either is sufficient). "
+                             "Default: 2. Ensures price still has room to build further. "
+                             "Use 0 to disable P6 side of depth guard.")
+    parser.add_argument("--spike-override-min-time", type=parse_time_arg, default=None,
+                        help="Block spike overrides before this time (HH:MM). "
+                             "Default: 09:45. Prevents session-open spike entries where no trend context exists. "
+                             "Use 09:20 (session start) to effectively disable the time guard.")
     parser.add_argument("--no-side-switch", action="store_true",
                         help="Disable side-switch: opposite-side signals while a trade is active are skipped "
                              "instead of closing the current trade and flipping. Default: side-switch ON.")
@@ -2228,6 +2352,8 @@ def apply_arg_config(args):
     global STRICT_CONFIRM_WINDOW, STRICT_MIN_CONFIRM_BARS, STRICT_ALLOW_VOLUME_NEUTRAL
     global STRICT_EXIT_CONFIRM_BARS, STRICT_EXIT_SURGE_RATIO, STRICT_SPIKE_OVERRIDE_SCORE
     global ALLOW_SIDE_SWITCH
+    global STRICT_SPIKE_MIN_V80, STRICT_SPIKE_MIN_P5, STRICT_SPIKE_MIN_OPP_P5
+    global STRICT_SPIKE_MIN_D4, STRICT_SPIKE_MIN_P6, STRICT_SPIKE_OVERRIDE_MIN_TIME
 
     OI_DATA_MODE = args.oi_data
     OI_PRINT_INTERVAL = args.print_interval
@@ -2252,6 +2378,19 @@ def apply_arg_config(args):
         STRICT_EXIT_SURGE_RATIO = args.exit_surge_ratio
     if args.spike_override_score is not None:
         STRICT_SPIKE_OVERRIDE_SCORE = args.spike_override_score
+    if hasattr(args, "spike_min_v80") and args.spike_min_v80 is not None:
+        STRICT_SPIKE_MIN_V80 = args.spike_min_v80
+    if hasattr(args, "spike_min_p5") and args.spike_min_p5 is not None:
+        STRICT_SPIKE_MIN_P5 = args.spike_min_p5
+    if hasattr(args, "spike_min_opp_p5") and args.spike_min_opp_p5 is not None:
+        STRICT_SPIKE_MIN_OPP_P5 = args.spike_min_opp_p5
+    if hasattr(args, "spike_min_d4") and args.spike_min_d4 is not None:
+        STRICT_SPIKE_MIN_D4 = args.spike_min_d4
+    if hasattr(args, "spike_min_p6") and args.spike_min_p6 is not None:
+        STRICT_SPIKE_MIN_P6 = args.spike_min_p6
+    if hasattr(args, "spike_override_min_time") and args.spike_override_min_time is not None:
+        # None means disable the guard; pass "off" or "00:00" from CLI to disable
+        STRICT_SPIKE_OVERRIDE_MIN_TIME = args.spike_override_min_time
     if args.no_side_switch:
         ALLOW_SIDE_SWITCH = False
     if args.strict_require_volume:
@@ -2390,4 +2529,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
