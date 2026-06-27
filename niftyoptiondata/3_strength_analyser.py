@@ -1,306 +1,88 @@
 r"""
-
-python -m py_compile .\3_strength_analyser.py
-default command to check oi buildup and strength report for a single CSV file and date:
-python .\3_strength_analyser.py --csv oi_2024_01_02.csv --date 2024-01-02
-
 Script 3: Options Flow Strength Analyser
-═════════════════════════════════════════
-Reads oi_2026_06_15.csv and produces a multi-layer strength report:
-
-  LAYER 1 — Same-candle spike    : delta + gamma both spike in same timestamp
-  LAYER 2 — Cross-candle trend   : delta + gamma + volume + price trending
-                                   over N candles (user configurable)
-  LAYER 3 — Cross-strike confirm : ATM strong → nearby strikes also strong?
-  LAYER 4 — Opposite-side weak   : CE strong + PE weak = bullish confirmation
-                                   PE strong + CE weak = bearish confirmation
-
-All thresholds are computed at RUNTIME from the actual data (rolling percentile).
-All % changes shown for delta, gamma, volume, price.
-Data filtered to SESSION_START – SESSION_END window.
-
-RUN MODES / COMMANDS
-
-  1. DEFAULT FULL MODE
-     Command:
-       python 3_strength_analyser.py
-
-       python 3_strength_analyser.py --csv oi_2024_12_31.csv --date 2024-12-31 --console-xlsx
-
-     What it does:
-       - Uses hardcoded CSV_PATH and ANALYSIS_DATE from USER CONFIG below.
-       - Prints the full OI buildup table from SESSION_START to SESSION_END.
-       - Prints top entries with entry/exit, PNL, best move PNL, best time,
-         delta %, gamma %, volume %, price %, and exit reason.
-       - Prints PE debug and final option trade summary.
-
-     Optional single-file argparse override:
-       python 3_strength_analyser.py --csv oi_2024_12_31.csv --date 2024-12-31
-
-     This still uses full mode output because --monthly is not passed.
-
-  2. COMPACT MONTHLY MODE
-     Command:
-       python 3_strength_analyser.py --monthly --month jan --year 2024
-
-     Month can be name or number:
-       python 3_strength_analyser.py --monthly --month january --year 2024
-       python 3_strength_analyser.py --monthly --month 1 --year 2024
-
-     If CSV files are in another folder:
-       python 3_strength_analyser.py --monthly --month jan --year 2024 --csv-dir C:\path\to\csvs
-
-     What it does:
-       - Scans weekly expiry CSVs named oi_YYYY_MM_DD.csv.
-       - Reads the timestamp column inside each CSV.
-       - Runs every actual trading date that falls in the selected month.
-       - If the same trading date appears in multiple weekly CSVs, the script
-         picks the nearest weekly expiry CSV for that date.
-       - Example: oi_2024_11_26.csv can run 2024-11-22 because that trading
-         date exists inside the CSV.
-       - Runs each matching trading date quietly.
-       - Does NOT print the OI buildup table.
-       - Prints only compact date-by-date summary:
-           CSV file, date, trades, profit count, loss count, flat count,
-           total PNL, and best move PNL.
-       - Prints every entry under that date with entry/exit, side, strike,
-         PNL, best move, Greeks/volume/price %, and exit reason.
-       - Prints one TOTAL row for the selected month.
-
-     Monthly expiry rule:
-       - Weekly expiry CSVs dated inside the selected month are included.
-       - By default, first 7 days of next month are also included because
-         weekly expiry can fall between month-end and the next month's first week.
-
-     To use only the selected calendar month and skip next month's first week:
-       python 3_strength_analyser.py --monthly --month jan --year 2024 --no-next-week
-
-  3. HELP
-     Command:
-       python 3_strength_analyser.py --help
-
-  4. MONTHLY MODE WITH FULL ENTRY CONFIG
-     Command:
-       python 3_strength_analyser.py --monthly --month february --year 2024 --no-next-week --entry-start 09:45 --flow 10 --same-side 2 --late-start 14:15 --late-flow 12 --early-entry --early-start 09:25 --early-flow 16 --early-same-side 3 --early-opp 2 --early-price-pct 6 --early-volume-pct 40 --early-no-cross-confirm --no-relax-cross-side
-
-     Change --month and --year for the month you want to test.
-
-     Config explanation:
-       --monthly
-         Runs compact monthly summary mode instead of full single-day table.
-
-       --month february
-         Selects the month. You can use name or number, e.g. february, feb, 2.
-
-       --year 2024
-         Selects the year for monthly mode.
-
-       --no-next-week
-         Uses only dates inside the selected calendar month. Without this,
-         the first 7 days of next month are also included for weekly expiry
-         continuity.
-
-       --entry-start 09:45
-         Normal entries start only from 09:45. This avoids many gap-open
-         option spikes between 09:20 and 09:44.
-
-       --flow 10
-         Minimum cross-strike FLOW score for normal entries. Higher value
-         means fewer entries but stronger nearby-strike confirmation.
-
-       --same-side 2
-         Minimum same-side confirming strikes. Example for CE: at least 2
-         nearby CE strikes should show supportive buildup.
-
-       --late-start 14:15
-         After 14:15, late-entry rules apply because there is less time left
-         before the 3 PM force exit.
-
-       --late-flow 12
-         Minimum FLOW required after --late-start. This blocks weak late
-         entries unless confirmation is stronger than normal.
-
-       --early-entry
-         Enables special early OI entries before 09:45. Without this flag,
-         entries before --entry-start are blocked.
-
-       --early-start 09:25
-         Earliest time allowed for early OI entries. Here, early window is
-         09:25 to 09:44.
-
-       --early-flow 16
-         Minimum FLOW score for early OI entries. Early entries need stronger
-         confirmation than normal entries because open-period moves can reverse.
-
-       --early-same-side 3
-         Minimum same-side confirming strikes for early OI entries.
-
-       --early-opp 2
-         Minimum opposite-side support strikes for early OI entries.
-         CE example: PE side should also confirm by weakening/selling pressure.
-
-       --early-price-pct 6
-         Minimum option price percentage increase for early OI entries.
-
-       --early-volume-pct 40
-         Minimum option volume percentage increase for early OI entries.
-
-       --early-no-cross-confirm
-         Allows early entries even if reason does not contain OI_BULL/OI_BEAR.
-         This gives more entries for debugging, but it is looser and can add
-         bad open-period trades.
-
-       --no-relax-cross-side
-         Disables the relaxed same-side rule. With this flag, the script uses
-         the direct --same-side requirement and does not relax it just because
-         OI_BULL/OI_BEAR exists.
-
-Exit logic added for better option-point capture:
-
-  1. Normal profit ladder
-     Once the option moves in profit, the script protects part of the best move.
-     Example:
-       best move +70 pts -> try to keep at least +45 pts.
-
-  2. Momentum entry room
-     If option price itself is expanding strongly, the trade is treated as a
-     momentum trade. Momentum trades are not trailed too tightly before +70 pts
-     best move, because many good CE/PE moves first shake and then expand.
-
-  3. Dynamic live strength exit
-     After entry, every minute the script checks nearby strikes and builds a
-     live score using:
-       - option price percentage change
-       - delta percentage change
-       - gamma percentage change
-       - volume percentage change
-       - same-side build
-       - opposite-side pressure
-
-     For CE trades:
-       CE_BUY build supports the trade.
-       PE_SELL build also supports the CE trade.
-       PE_BUY or CE_SELL warns that CE strength may be fading.
-
-     For PE trades:
-       PE_BUY build supports the trade.
-       CE_SELL build also supports the PE trade.
-       CE_BUY or PE_SELL warns that PE strength may be fading.
-
-     Strong live score:
-       keep trailing loose so bigger moves can continue.
-
-     Weak live score:
-       wait for confirmation bars, then tighten trailing to protect PNL.
-
-     This is why a trade with big OI/price/delta build should not book only
-     8-10 pts just because of one weak minute. The script waits for confirmed
-     weakness and gives momentum entries enough room to capture larger points.
-
-  4. Single active trade rule
-     When ALLOW_OVERLAPPING_TRADES = False, the script allows only one active
-     option trade at a time. If one entry is already running, all new entry
-     signals are skipped until the first trade exits.
-
-  5. Bad-move based stop loss
-     BAD MOVE shows the worst option-price move after entry.
-     If BEST MOVE is large but BAD MOVE is only slightly below the old stop,
-     the entry was good but the stop was too tight.
-
-     Stop logic:
-       - normal entries: 30 points
-       - price-momentum entries: 45 points
-       - super-strong price momentum + flow entries: 60 points
-
-     Super-strong means:
-       - PRICE_MOMENTUM entry
-       - FLOW >= SUPER_MOMENTUM_FLOW_SCORE
-       - same-side build >= SUPER_MOMENTUM_SIDE_COUNT
-       - opposite-side support >= SUPER_MOMENTUM_SIDE_COUNT
-
-  6. Strict price-momentum override quality
-     A high option price % candle alone is not enough. In October/December logs,
-     many losing trades had P% > 10 but BEST MOVE was tiny and BAD MOVE was deep.
-     That means the candle was only a spike, not a supported trend.
-
-     If price momentum is used to bypass the 200MA/chop filter, require:
-       - FLOW >= MOMENTUM_OVERRIDE_MIN_FLOW
-       - same-side build >= MOMENTUM_OVERRIDE_MIN_SAME_SIDE
-       - opposite-side support >= MOMENTUM_OVERRIDE_MIN_OPP_SUPPORT
-       - EMA20 and EMA50 slope moving with trade direction
-
-     Example:
-       CE entry needs CE_BUY plus PE_SELL support.
-       PE entry needs PE_BUY plus CE_SELL support.
-
-  7. Entry-quality hard filters
-     These filters target the biggest bad-move patterns from the monthly logs:
-
-       - ENTRY_START = 09:45
-         Blocks gap-open option spikes. Before 09:45, option price often jumps
-         at the top of the opening move and then mean-reverts.
-
-       - MIN_ENTRY_FLOW_SCORE = 10
-         Requires stronger nearby-strike confirmation before entry.
-
-       - MIN_SAME_SIDE_COUNT = 2
-         One nearby strike can be noise. Two same-side strikes is better flow.
-
-       - DAILY_LOSS_LIMIT = 2 with DAILY_LOSS_CUTOFF = 13:00
-         If two accepted trades are already losses, skip new entries after 13:00.
-         This avoids repeated chop re-entries late in the day.
-
-       - LATE_ENTRY_START = 14:15 and LATE_ENTRY_MIN_FLOW = 12
-         Late trades need stronger confirmation because there is less time for
-         the move to develop before the 3 PM force exit.
-
-  8. Cross-side OI buildup confirmation
-     This catches the strong entry pattern seen in the shared OI buildup logs:
-
-       Bullish CE entry:
-         - CE nearby strikes: delta up, volume up, option price up.
-         - PE nearby strikes: delta weakening, volume up, option price down.
-         - If both sides confirm across enough strikes, reason shows OI_BULL.
-
-       Bearish PE entry:
-         - PE nearby strikes: volume up and option price up.
-         - CE nearby strikes: delta weakening, volume up, option price down.
-         - If both sides confirm across enough strikes, reason shows OI_BEAR.
-
-     Gamma is used as a bonus, not a hard requirement, because option gamma can
-     rise on both sides during fast moves.
-
-  9. Optional early super-strong OI entry
-     Normal entries still start at ENTRY_START = 09:45.
-     With --early-entry, the script can accept 09:25-09:45 entries only when
-     the OI buildup is very strong:
-       - FLOW >= EARLY_ENTRY_MIN_FLOW
-       - same-side strikes >= EARLY_ENTRY_MIN_SAME_SIDE
-       - opposite-side support >= EARLY_ENTRY_MIN_OPP_SUPPORT
-       - option price % >= EARLY_ENTRY_MIN_PRICE_PCT
-       - option volume % >= EARLY_ENTRY_MIN_VOLUME_PCT
-       - reason contains OI_BULL for CE or OI_BEAR for PE
-
-     This is meant for days like 2024-02-05 where CE buildup started strongly
-     before 09:45. It is not a blanket open-gap entry unlock.
-
-
-# Back data, default
-python 3_strength_analyser.py --nifty-data back
-
-# Live data
-python 3_strength_analyser.py --nifty-data live
-
-python 3_strength_analyser.py --console-xlsx 2026-06-16_5mins.xlsx
-python 3_strength_analyser.py --print-interval 1min --console-xlsx 2026-06-16_1mins.xlsx
-
-
-python 3_strength_analyser.py --oi-data live --nifty-data live --csv oi_live_2026_06_30.csv --date 2026-06-24 --print-interval 1min
-
-python 3_strength_analyser.py --oi-data live --nifty-data live --csv oi_live_2026_06_30.csv --date 2026-06-24 --print-interval 5min
 
+Default compile check:
+  python -m py_compile .\3_strength_analyser.py
+
+Default single-day command:
+  python .\3_strength_analyser.py --csv oi_2024_12_31.csv --date 2024-12-31 --console-xlsx
+
+1-minute console Excel:
+  python .\3_strength_analyser.py --csv oi_2024_12_31.csv --date 2024-12-31 --print-interval 1min --console-xlsx
+
+5-minute console Excel:
+  python .\3_strength_analyser.py --csv oi_2024_12_31.csv --date 2024-12-31 --print-interval 5min --console-xlsx
+
+Current entry/exit model
+========================
+
+Only the strict cross-strike confirmation rule is used for option trade entry
+and exit. The older ideas such as MA/chop entry blocking, generic flow entry,
+early-entry unlocks, price-momentum override entries, analysis-text entries,
+adaptive momentum stop loss, profit ladder exits, dynamic trailing exits, and
+weak failed-trade exits are not used for trade decisions now.
+
+CE entry criteria
+-----------------
+
+The script checks the selected strike plus nearby strikes. A CE entry is valid
+only when both sides confirm the same bullish story:
+
+  1. Own side strength:
+     Nearby CE strikes must show delta %, price %, and volume % strength.
+     Defaults: CE delta % >= 2, CE price % >= 3, CE volume % >= 80.
+     At least 3 nearby CE strikes must confirm by default.
+
+  2. Opposite side weakness:
+     Nearby PE strikes must weaken while CE strengthens.
+     Defaults: PE delta % <= -2 and PE price % <= -3.
+     PE volume may increase by >= 80 as sell pressure, or go negative as
+     PE-side exit/unwinding.
+     At least 2 nearby PE strikes must confirm by default.
+
+  3. Repeated confirmation:
+     The confirmation must repeat inside the recent snapshot window.
+     Default checks the last 5 snapshots and needs 3 valid confirmations.
+     The newest confirmation score must be >= the first confirmation score.
+
+PE entry criteria
+-----------------
+
+PE entry is the mirror image of CE:
+  1. Nearby PE strikes need delta %, price %, and volume % strength.
+  2. Nearby CE strikes need delta % and price % weakness.
+  3. CE volume may rise as sell pressure or reduce as CE exit/unwinding.
+  4. Confirmation must repeat in the recent snapshot window and must not fade.
+
+Exit criteria
+-------------
+
+Every accepted trade exits using only these rules:
+  1. Fixed stop loss of 30 option points from entry.
+  2. Strict opposite-side confirmation.
+     CE trade exits when PE gives repeated strict confirmation.
+     PE trade exits when CE gives repeated strict confirmation.
+     Default requires 2 consecutive opposite confirmations, with latest score
+     >= first score.
+  3. Force exit near market close at FORCE_EXIT.
+
+Tunable strict-rule parameters
+------------------------------
+
+Use these argparse options to test different strict confirmation settings:
+  --strict-volume-pct 80
+  --strict-delta-pct 2
+  --strict-price-pct 3
+  --strict-same-strikes 3
+  --strict-opp-strikes 2
+  --strict-window 5
+  --strict-confirm-bars 3
+  --strict-exit-bars 2
+  --strict-require-volume
+
+Monthly mode:
+  python .\3_strength_analyser.py --monthly --month jan --year 2024
 """
-
 import argparse
 import contextlib
 import io
@@ -315,9 +97,9 @@ for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # USER CONFIG
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 CSV_PATH         = "oi_2026_06_16.csv"
 ANALYSIS_DATE    = "2026-06-16"
 SIDE             = "both"          # "ce" | "pe" | "both"
@@ -344,29 +126,30 @@ OUT_CONSOLE_XLSX = str(REPORTS_DIR / "console_output.xlsx")
 TOP_N = 20
 ALLOW_OVERLAPPING_TRADES = False  # False = one active trade only; next entry after exit
 
-# Entry-quality filters from monthly bad-move review.
-ENTRY_START = dtime(9, 30)       # allow confirmed early OI setups after opening noise
-MIN_ENTRY_FLOW_SCORE = 10        # was 6; require stronger cross-strike flow
-MIN_SAME_SIDE_COUNT = 2          # was 1; avoid single-strike noise entries
-DAILY_LOSS_LIMIT = 2             # after this many losses, late re-entry is blocked
-DAILY_LOSS_CUTOFF = dtime(13, 0) # after 13:00, stop re-entering if day already failed
-LATE_ENTRY_START = dtime(14, 15)
-LATE_ENTRY_MIN_FLOW = 12
-USE_EARLY_OI_ENTRY = False
-EARLY_ENTRY_START = dtime(9, 25)
-EARLY_ENTRY_MIN_FLOW = 16
-EARLY_ENTRY_MIN_SAME_SIDE = 3
-EARLY_ENTRY_MIN_OPP_SUPPORT = 2
-EARLY_ENTRY_MIN_PRICE_PCT = 6
-EARLY_ENTRY_MIN_VOLUME_PCT = 40
-EARLY_REQUIRE_CROSS_CONFIRM = True
-RELAX_SAME_SIDE_ON_CROSS_CONFIRM = True
-RELAXED_MIN_SAME_SIDE = 1
-RELAXED_MIN_OPP_SUPPORT = 2
-
-# Strict cross-strike entry mode. Disabled by default; enable with
-# --strict-cross-entry to test volume/delta/price confirmation rules.
-USE_STRICT_CROSS_ENTRY = False
+# Entry/exit model:
+# Only strict cross-strike confirmation is used for option trade decisions.
+#
+# ENTRY - CE:
+#   1. Nearby CE strikes must show delta %, price %, and volume % strength.
+#   2. Nearby PE strikes must respect the bullish move by weakening:
+#      PE delta % drops and PE price % drops. PE volume may either increase
+#      as sell pressure or reduce as exits from that side.
+#   3. This confirmation must repeat inside the recent snapshot window.
+#      Default: 3 confirmations in the last 5 snapshots.
+#   4. The newest confirmation score must be >= the first confirmation score,
+#      so the entry waits for confirmation that is not fading.
+#
+# ENTRY - PE:
+#   Mirror logic: PE delta/price/volume strength with CE delta/price weakness.
+#
+# EXIT:
+#   1. Fixed 30-point stop loss.
+#   2. Exit when the opposite side gives repeated strict confirmation and the
+#      latest opposite confirmation is at least as strong as the first.
+#   3. Force exit at FORCE_EXIT.
+# Strict cross-strike entry is always on and is the only trade entry rule.
+ENTRY_START = dtime(9, 20)
+USE_STRICT_CROSS_ENTRY = True
 STRICT_MIN_VOLUME_PCT = 80
 STRICT_MIN_DELTA_PCT = 2
 STRICT_MIN_PRICE_PCT = 3
@@ -377,89 +160,12 @@ STRICT_MIN_CONFIRM_BARS = 3
 STRICT_ALLOW_VOLUME_NEUTRAL = True
 STRICT_EXIT_CONFIRM_BARS = 2
 
-# Exit rule:
-# For CE/PE buy, exit when any 3 of Delta%, Gamma%, Volume%, Price% become negative.
-EXIT_NEG_COUNT = 3
-# EXIT CONFIG
-MIN_HOLD_BARS = 20          # don't exit immediately after entry
-EXIT_WEAK_BARS = 5          # need 3 continuous weak candles
-TRAIL_DROP_PTS = 40         # exit if option falls 25 pts from best price
-STOP_LOSS_PTS = 30          # base fixed max loss from entry price
-MOMENTUM_STOP_LOSS_PTS = 45 # strong price-momentum entries need more room
-SUPER_MOMENTUM_STOP_LOSS_PTS = 60
-SUPER_MOMENTUM_FLOW_SCORE = 16
-SUPER_MOMENTUM_SIDE_COUNT = 4
-WEAK_EXIT_LOSS_PTS = 15     # weak exit only after this much loss, not while trade is green
-MOMENTUM_MIN_HOLD_BARS = 45 # strong price-momentum entries get more room to develop
+# Exit config: fixed stop, strict opposite confirmation, or force exit only.
+STOP_LOSS_PTS = 30
 
 ENTRY_CUTOFF = dtime(15, 0)   # no new entries after 3 PM
 FORCE_EXIT   = dtime(15, 25)  # force exit near market close, after late moves can mature
-TRAIL_ACTIVATE_PTS = 40     # trailing starts only after +30 pts profit
-TRAIL_LOCK_PTS     = 30     # after activation, protect 20 pts profit
-
-# Profit ladder for exits. Once best move reaches a tier, protect more profit.
-# Format: (best_move_trigger, minimum_locked_profit, max_drop_from_best_price)
-# Example: best +70 -> lock at least +45 and trail by 25 from the best price.
-PROFIT_TRAIL_TIERS = [
-    (100, 78, 25),
-    (70, 48, 25),
-    (40, 28, 22),
-    (25,  18, 18),
-]
-
-# Price-momentum entries get wider trailing so fast CE/PE expansion is not
-# booked too early. Example: if best move reaches +70, protect +45 but allow
-# a 35 point pullback from best price.
-MOMENTUM_PROFIT_TRAIL_TIERS = [
-    (100, 75, 30),
-    (70, 45, 35),
-]
-
-# Hard booking for strong analysis/momentum setups. This prevents a clean
-# +60/+100 option move from being carried all the way back to flat or loss.
-PROFIT_BOOK_TARGETS = [
-    (100, 90),
-    (70, 60),
-    (55, 50),
-]
-
-# Dynamic exit scoring:
-# Every minute after entry, check nearby strikes for CE/PE build.
-#
-# For CE:
-#   same-side build = CE buying strength
-#   support build   = PE selling pressure
-#   danger build    = PE buying or CE selling
-#
-# For PE:
-#   same-side build = PE buying strength
-#   support build   = CE selling pressure
-#   danger build    = CE buying or PE selling
-#
-# Strong score means keep trailing loose to capture bigger move.
-# Weak score means tighten trailing only after confirmation bars.
-USE_DYNAMIC_STRENGTH_EXIT = True
-DYNAMIC_EXIT_NEARBY_STRIKES = 2
-STRONG_EXIT_SCORE = 8
-WEAK_EXIT_SCORE = 3
-DYNAMIC_WEAK_CONFIRM_BARS = 5
-DYNAMIC_STRONG_CONFIRM_BARS = 2
-
 MAX_PRICE_XPCT = 20
-
-# Price momentum override:
-# If option price itself expands strongly, allow that entry even when NIFTY is
-# below/above 200 MA or the 200 MA is flat, as long as NIFTY is on the right
-# side of EMA20. This catches breakout candles like 2024-12-31 10:52 CE.
-USE_PRICE_MOMENTUM_OVERRIDE = True
-PRICE_MOMENTUM_ENTRY_PCT = 10
-ALLOW_PRICE_MOMENTUM_OVEREXTENDED = True
-STRICT_MOMENTUM_OVERRIDE_QUALITY = True
-MOMENTUM_OVERRIDE_MIN_FLOW = 12
-MOMENTUM_OVERRIDE_MIN_SAME_SIDE = 3
-MOMENTUM_OVERRIDE_MIN_OPP_SUPPORT = 2
-MOMENTUM_OVERRIDE_EMA20_SLOPE_MIN = 3
-MOMENTUM_OVERRIDE_EMA50_SLOPE_MIN = 2
 
 # Cross-side OI buildup confirmation:
 # Bullish setup = CE buying across nearby strikes + PE selling confirmation.
@@ -516,9 +222,9 @@ CROSS_COUNT_MIN = 3
 AVG_RANGE_LOOKBACK = 20
 AVG_RANGE_MAX = 10
 _NIFTY_200MA_CACHE = None
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-# ── ANSI ──────────────────────────────────────────────────────────────────────
+# â”€â”€ ANSI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def _c(t, code): return f"\033[{code}m{t}\033[0m"
 def green(t):        return _c(t, "32")
 def bright_green(t): return _c(t, "92")
@@ -542,7 +248,7 @@ def ljust(s, w):
 
 def color_pct(val, extreme=20.0):
     if pd.isna(val): return dim("    n/a ")
-    sign = "▲" if val > 0 else "▼" if val < 0 else " "
+    sign = "â–²" if val > 0 else "â–¼" if val < 0 else " "
     txt  = f"{sign}{abs(val):6.2f}%"
     if val > extreme:    return bright_green(txt)
     elif val > 0:        return green(txt)
@@ -571,11 +277,11 @@ def strength_label(score):
     if score >= 25: return yellow("WEAK    ")
     return red("VERY WK ")
 
-def sep(w=130): print(dim("─" * w))
+def sep(w=130): print(dim("â”€" * w))
 def header(title, w=130):
-    print(bold("═" * w))
+    print(bold("â•" * w))
     print(bold(f"  {title}"))
-    print(bold("═" * w))
+    print(bold("â•" * w))
 
 class TeeConsole:
     def __init__(self, wrapped):
@@ -922,181 +628,6 @@ def passes_nifty_chop_filter(row):
 
     return False, f"CHOP {int(score)}: " + ",".join(reasons)
 
-def price_momentum_override(row, side, price_pct):
-    if not USE_PRICE_MOMENTUM_OVERRIDE:
-        return False, "OFF"
-
-    close = row.get("nifty_close", np.nan)
-    ema20 = row.get("ema20", np.nan)
-    ema50 = row.get("ema50", np.nan)
-    if pd.isna(close) or pd.isna(ema20) or pd.isna(ema50) or pd.isna(price_pct):
-        return False, "missing"
-
-    if price_pct < PRICE_MOMENTUM_ENTRY_PCT:
-        return False, f"P%<{PRICE_MOMENTUM_ENTRY_PCT}"
-
-    if side == "ce" and close >= ema20 and close >= ema50:
-        return True, f"PRICE_MOMENTUM CE P%>={PRICE_MOMENTUM_ENTRY_PCT} NIFTY>=EMA20/50"
-    if side == "pe" and close <= ema20 and close <= ema50:
-        return True, f"PRICE_MOMENTUM PE P%>={PRICE_MOMENTUM_ENTRY_PCT} NIFTY<=EMA20/50"
-
-    return False, "wrong side EMA20/50"
-
-def momentum_override_slope_ok(row, side):
-    slope20 = row.get("ema20_slope", np.nan)
-    slope50 = row.get("ema50_slope", np.nan)
-    if pd.isna(slope20) or pd.isna(slope50):
-        return True
-
-    if side == "ce":
-        return (
-            slope20 >= MOMENTUM_OVERRIDE_EMA20_SLOPE_MIN and
-            slope50 >= MOMENTUM_OVERRIDE_EMA50_SLOPE_MIN
-        )
-
-    return (
-        slope20 <= -MOMENTUM_OVERRIDE_EMA20_SLOPE_MIN and
-        slope50 <= -MOMENTUM_OVERRIDE_EMA50_SLOPE_MIN
-    )
-
-def live_side_build_counts(full, ts, strike):
-    nearby = full[
-        (full["timestamp"] == ts) &
-        (full["strike"] >= strike - DYNAMIC_EXIT_NEARBY_STRIKES * STRIKE_STEP) &
-        (full["strike"] <= strike + DYNAMIC_EXIT_NEARBY_STRIKES * STRIKE_STEP)
-    ]
-
-    if nearby.empty:
-        return 0, 0, 0, 0
-
-    ce_buy = int(((nearby["ce_d_pct"] > 3) & (nearby["ce_g_pct"] > 0) & (nearby["ce_v_pct"] > 30) & (nearby["ce_p_pct"] > 1)).sum())
-    pe_sell = int(((nearby["pe_d_pct"] < 0) & (nearby["pe_v_pct"] > 30) & (nearby["pe_p_pct"] < -1)).sum())
-    pe_buy = int(((nearby["pe_d_pct"] > 3) & (nearby["pe_g_pct"] > 0) & (nearby["pe_v_pct"] > 30) & (nearby["pe_p_pct"] > 1)).sum())
-    ce_sell = int(((nearby["ce_d_pct"] < 0) & (nearby["ce_v_pct"] > 30) & (nearby["ce_p_pct"] < -1)).sum())
-
-    return ce_buy, pe_sell, pe_buy, ce_sell
-
-def live_exit_strength_score(full, row, strike, side):
-    if not USE_DYNAMIC_STRENGTH_EXIT:
-        return 0, "OFF"
-
-    ts = row["timestamp"]
-    ce_buy, pe_sell, pe_buy, ce_sell = live_side_build_counts(full, ts, strike)
-
-    if side == "ce":
-        same_build = ce_buy
-        opp_support = pe_sell
-        opposite_build = pe_buy + ce_sell
-        d_pct = row.get("ce_d_pct", 0)
-        g_pct = row.get("ce_g_pct", 0)
-        v_pct = row.get("ce_v_pct", 0)
-        p_pct = row.get("ce_p_pct", 0)
-    else:
-        same_build = pe_buy
-        opp_support = ce_sell
-        opposite_build = ce_buy + pe_sell
-        d_pct = row.get("pe_d_pct", 0)
-        g_pct = row.get("pe_g_pct", 0)
-        v_pct = row.get("pe_v_pct", 0)
-        p_pct = row.get("pe_p_pct", 0)
-
-    own_score = 0
-    own_score += 2 if d_pct > 3 else -1 if d_pct < 0 else 0
-    own_score += 2 if g_pct > 0 else -1
-    own_score += 2 if v_pct > 30 else -1 if v_pct < 0 else 0
-    own_score += 2 if p_pct > 1 else -2 if p_pct < 0 else 0
-
-    flow_score = same_build * 2 + opp_support * 2 - opposite_build * 2
-    score = own_score + flow_score
-    reason = f"LIVE={score} SAME={same_build} OPP_SUPPORT={opp_support} OPP_BUILD={opposite_build}"
-    return score, reason
-
-def dynamic_trailing_rule(best_move, live_score, momentum_entry, analysis_entry=False):
-    if best_move < 25:
-        return None
-
-    protected_entry = momentum_entry or analysis_entry
-
-    # Momentum entries need room. Do not start trailing them on small profit
-    # unless the live score is strongly positive. This avoids booking 8-10 pts
-    # before the later OI/price build creates the real move.
-    if protected_entry and best_move < 40:
-        return None
-    if protected_entry and best_move < 70 and live_score < STRONG_EXIT_SCORE:
-        return None
-
-    if live_score >= STRONG_EXIT_SCORE:
-        if protected_entry and best_move < 70:
-            return None
-        if best_move >= 100:
-            return 75, 40
-        if best_move >= 70:
-            return 45, 45
-        if best_move >= 40:
-            return 20, 50
-        return 5, 40
-
-    if live_score <= WEAK_EXIT_SCORE:
-        if best_move >= 100:
-            return 80, 25
-        if best_move >= 70:
-            return 50, 25
-        if best_move >= 40:
-            return 25, 20
-        return 10, 15
-
-    if protected_entry:
-        if best_move >= 100:
-            return 75, 30
-        if best_move >= 70:
-            return 45, 35
-        if best_move >= 40:
-            return 25, 35
-        return None
-
-    if best_move >= 100:
-        return 75, 25
-    if best_move >= 70:
-        return 45, 25
-    if best_move >= 40:
-        return 25, 20
-    return 10, 15
-
-def profit_book_target(best_move, protected_entry, timestamp=None, analysis_entry=False):
-    if not protected_entry:
-        return None
-    targets = PROFIT_BOOK_TARGETS
-    if analysis_entry and timestamp is not None and timestamp.time() < dtime(13, 0):
-        targets = [(100, 90)]
-    for trigger, lock in targets:
-        if best_move >= trigger:
-            return lock
-    return None
-
-def adaptive_stop_loss_pts(momentum_entry=False, flow_score=0, same_side_count=0, opp_side_count=0):
-    """
-    Bad-move analysis showed that strong momentum entries can dip slightly
-    beyond the old fixed stop and then make the real move later.
-
-    Base entries use 30 pts.
-    Momentum entries use 45 pts.
-    Super-strong momentum flow uses 60 pts:
-      - price momentum entry
-      - FLOW >= SUPER_MOMENTUM_FLOW_SCORE
-      - same-side build and opposite-side support both strong
-    """
-    if not momentum_entry:
-        return STOP_LOSS_PTS
-
-    if (
-        flow_score >= SUPER_MOMENTUM_FLOW_SCORE and
-        same_side_count >= SUPER_MOMENTUM_SIDE_COUNT and
-        opp_side_count >= SUPER_MOMENTUM_SIDE_COUNT
-    ):
-        return SUPER_MOMENTUM_STOP_LOSS_PTS
-
-    return MOMENTUM_STOP_LOSS_PTS
-
 def find_exit_after_entry(
     full,
     entry_ts,
@@ -1104,23 +635,11 @@ def find_exit_after_entry(
     side,
     entry_price,
     col_map,
-    momentum_entry=False,
-    analysis_entry=False,
-    flow_score=0,
-    same_side_count=0,
-    opp_side_count=0,
     snapshot_analysis=None,
     strict_entry=False,
 ):
     cm = col_map[side]
-    stop_loss_pts = adaptive_stop_loss_pts(
-        momentum_entry=momentum_entry,
-        flow_score=flow_score,
-        same_side_count=same_side_count,
-        opp_side_count=opp_side_count,
-    )
-    if analysis_entry:
-        stop_loss_pts = max(stop_loss_pts, MOMENTUM_STOP_LOSS_PTS)
+    stop_loss_pts = STOP_LOSS_PTS
 
     trade = full[
         (full["timestamp"] > entry_ts) &
@@ -1130,10 +649,6 @@ def find_exit_after_entry(
     if trade.empty:
         return entry_ts, entry_price, 0, "No future data"
 
-    best_price = entry_price
-    weak_count = 0
-    dynamic_weak_count = 0
-    dynamic_strong_count = 0
     strict_opp_first_score = None
     strict_opp_confirm_count = 0
 
@@ -1144,111 +659,31 @@ def find_exit_after_entry(
         if r["timestamp"].time() >= FORCE_EXIT:
             pnl = price - entry_price
             return r["timestamp"], price, pnl, f"Exit: force exit {FORCE_EXIT.strftime('%H:%M')}"
-        
-        price = r[cm["price"]]
-        best_price = max(best_price, price)
 
         pnl_now = price - entry_price
-        best_move = best_price - entry_price
-
-        if i >= 3 and pnl_now > 0 and best_move >= 15 and snapshot_analysis is not None:
-            analysis_reason = analysis_exit_reason(snapshot_analysis.get(r["timestamp"]), side)
-            if analysis_reason:
-                if analysis_entry and best_move < 55:
-                    continue
-                pnl = price - entry_price
-                return r["timestamp"], price, pnl, analysis_reason
 
         if pnl_now <= -stop_loss_pts:
-            pnl = price - entry_price
-            return r["timestamp"], price, pnl, f"Exit: stop loss -{stop_loss_pts}"
+            return r["timestamp"], price, pnl_now, f"Exit: stop loss -{stop_loss_pts}"
 
-        protected_entry = momentum_entry or analysis_entry
-        min_hold_bars = MOMENTUM_MIN_HOLD_BARS if protected_entry else MIN_HOLD_BARS
-
-        if strict_entry and i >= 1:
-            opp = opposite_side(side)
-            opp_ok, opp_score, _, _, opp_reason = strict_cross_snapshot(
-                full, r["timestamp"], strike, opp
-            )
-            if opp_ok:
-                strict_opp_confirm_count += 1
-                if strict_opp_first_score is None:
-                    strict_opp_first_score = opp_score
-                if (
-                    strict_opp_confirm_count >= STRICT_EXIT_CONFIRM_BARS and
-                    opp_score >= strict_opp_first_score
-                ):
-                    pnl = price - entry_price
-                    return r["timestamp"], price, pnl, (
-                        f"Exit: strict opposite confirm {opp_reason} "
-                        f"CNT={strict_opp_confirm_count}"
-                    )
-            else:
-                strict_opp_confirm_count = 0
-                strict_opp_first_score = None
-
-        # Do not exit too early
-        if i < min_hold_bars:
-            continue
-
-        book_pts = profit_book_target(best_move, protected_entry, entry_ts, analysis_entry)
-        if book_pts is not None and pnl_now >= book_pts:
-            pnl = price - entry_price
-            return r["timestamp"], price, pnl, f"Exit: profit book +{book_pts}"
-
-        d_weak = r[f"{side}_d_pct"] < 0
-        g_weak = r[f"{side}_g_pct"] < 0
-        v_weak = r[f"{side}_v_pct"] < 0
-        p_weak = r[f"{side}_p_pct"] < 0
-
-        weak_now = sum([d_weak, g_weak, v_weak, p_weak]) >= 3
-
-        if weak_now:
-            weak_count += 1
-        else:
-            weak_count = 0
-
-        live_score, live_reason = live_exit_strength_score(full, r, strike, side)
-        if live_score <= WEAK_EXIT_SCORE:
-            dynamic_weak_count += 1
-        else:
-            dynamic_weak_count = 0
-
-        if live_score >= STRONG_EXIT_SCORE:
-            dynamic_strong_count += 1
-        else:
-            dynamic_strong_count = 0
-
-        confirmed_live_score = 5
-        if dynamic_strong_count >= DYNAMIC_STRONG_CONFIRM_BARS:
-            confirmed_live_score = live_score
-        elif dynamic_weak_count >= DYNAMIC_WEAK_CONFIRM_BARS:
-            confirmed_live_score = live_score
-
-        # Analysis entries are already governed by snapshot handoff/fading
-        # rules. Letting the generic live trail close them can exit a strong
-        # trend before the opposite side has actually taken over.
-        dynamic_rule = None if analysis_entry else dynamic_trailing_rule(
-            best_move, confirmed_live_score, momentum_entry, analysis_entry
+        opp = opposite_side(side)
+        opp_ok, opp_score, _, _, opp_reason = strict_cross_snapshot(
+            full, r["timestamp"], strike, opp
         )
-
-        if dynamic_rule:
-            lock_pts, drop_pts = dynamic_rule
-            trail_sl = max(entry_price + lock_pts, best_price - drop_pts)
-
-            if price <= trail_sl:
-                pnl = price - entry_price
-                return r["timestamp"], price, pnl, (
-                    f"Exit: dynamic trail +{lock_pts} {live_reason} "
-                    f"W{dynamic_weak_count} S{dynamic_strong_count}"
+        if opp_ok:
+            strict_opp_confirm_count += 1
+            if strict_opp_first_score is None:
+                strict_opp_first_score = opp_score
+            if (
+                strict_opp_confirm_count >= STRICT_EXIT_CONFIRM_BARS and
+                opp_score >= strict_opp_first_score
+            ):
+                return r["timestamp"], price, pnl_now, (
+                    f"Exit: strict opposite confirm {opp_reason} "
+                    f"CNT={strict_opp_confirm_count}"
                 )
-
-        # Weakness exit is for failed trades only. Do not kill a green trade
-        # just because Greeks cool off before the option makes its larger move.
-        if not protected_entry and weak_count >= EXIT_WEAK_BARS and best_move < 25 and pnl_now <= -WEAK_EXIT_LOSS_PTS:
-            pnl = price - entry_price
-            return r["timestamp"], price, pnl, "Exit: weak failed trade"
+        else:
+            strict_opp_confirm_count = 0
+            strict_opp_first_score = None
 
     last = trade.iloc[-1]
     exit_price = last[cm["price"]]
@@ -1297,143 +732,6 @@ def compute_strike_bad_move(full, entry_ts, strike, side, entry_price, col_map):
     bad_move = low_price - float(entry_price)
 
     return round(bad_move, 2), low_row["timestamp"], round(low_price, 2)
-
-def get_flow_confirm(full, ts, strike, side):
-    """
-    Cross-side OI buildup confirmation.
-
-    Bullish:
-      CE nearby strikes show delta + volume + price expansion.
-      PE nearby strikes show weakening delta + volume build + price fall.
-
-    Bearish:
-      PE nearby strikes show volume + price expansion.
-      CE nearby strikes show weakening delta + volume build + price fall.
-
-    Gamma gives a bonus only; it is not required because gamma can rise on both
-    CE and PE during fast option repricing.
-    """
-    nearby = full[
-        (full["timestamp"] == ts) &
-        (full["strike"] >= strike - STRIKES_NEARBY * STRIKE_STEP) &
-        (full["strike"] <= strike + STRIKES_NEARBY * STRIKE_STEP)
-    ].copy()
-
-    if nearby.empty:
-        return 0, 0, 0, "NO_NEARBY"
-
-    ce_buy = 0
-    pe_sell = 0
-    pe_buy = 0
-    ce_sell = 0
-    ce_gamma_bonus = 0
-    pe_gamma_bonus = 0
-
-    for _, r in nearby.iterrows():
-        ce_buying = (
-            r["ce_d_pct"] >= OI_BUILD_MIN_BUY_D_PCT and
-            r["ce_v_pct"] >= OI_BUILD_MIN_BUY_V_PCT and
-            r["ce_p_pct"] >= OI_BUILD_MIN_BUY_P_PCT
-        )
-        pe_selling = (
-            r["pe_d_pct"] <= -OI_BUILD_MIN_SELL_D_DROP_PCT and
-            r["pe_v_pct"] >= OI_BUILD_MIN_SELL_V_PCT and
-            r["pe_p_pct"] <= -OI_BUILD_MIN_SELL_P_DROP_PCT
-        )
-        pe_buying = (
-            r["pe_v_pct"] >= OI_BUILD_MIN_BUY_V_PCT and
-            r["pe_p_pct"] >= OI_BUILD_MIN_BUY_P_PCT
-        )
-        ce_selling = (
-            r["ce_d_pct"] <= -OI_BUILD_MIN_SELL_D_DROP_PCT and
-            r["ce_v_pct"] >= OI_BUILD_MIN_SELL_V_PCT and
-            r["ce_p_pct"] <= -OI_BUILD_MIN_SELL_P_DROP_PCT
-        )
-
-        if ce_buying:
-            ce_buy += 1
-            if r["ce_g_pct"] >= OI_BUILD_MIN_BUY_G_PCT:
-                ce_gamma_bonus += OI_BUILD_GAMMA_BONUS_PER_STRIKE
-
-        if pe_selling:
-            pe_sell += 1
-
-        if pe_buying:
-            pe_buy += 1
-            if r["pe_g_pct"] >= OI_BUILD_MIN_BUY_G_PCT:
-                pe_gamma_bonus += OI_BUILD_GAMMA_BONUS_PER_STRIKE
-
-        if ce_selling:
-            ce_sell += 1
-
-    if side == "ce":
-        strong_cross_side = (
-            ce_buy >= OI_BUILD_MIN_BUY_STRIKES and
-            pe_sell >= OI_BUILD_MIN_SELL_STRIKES
-        )
-        flow_score = ce_buy * 2 + pe_sell * 2 + ce_gamma_bonus
-        tags = []
-        if strong_cross_side:
-            flow_score += OI_BUILD_STRONG_BONUS
-            tags.append("OI_BULL")
-        if ce_gamma_bonus:
-            tags.append(f"CE_GBONUS={ce_gamma_bonus}")
-        reason = f"CE_BUY={ce_buy} PE_SELL={pe_sell}"
-        if tags:
-            reason += " " + " ".join(tags)
-        return flow_score, ce_buy, pe_sell, reason
-
-    strong_cross_side = (
-        pe_buy >= OI_BUILD_MIN_BUY_STRIKES and
-        ce_sell >= OI_BUILD_MIN_SELL_STRIKES
-    )
-    flow_score = pe_buy * 2 + ce_sell * 2 + pe_gamma_bonus
-    tags = []
-    if strong_cross_side:
-        flow_score += OI_BUILD_STRONG_BONUS
-        tags.append("OI_BEAR")
-    if pe_gamma_bonus:
-        tags.append(f"PE_GBONUS={pe_gamma_bonus}")
-    reason = f"PE_BUY={pe_buy} CE_SELL={ce_sell}"
-    if tags:
-        reason += " " + " ".join(tags)
-    return flow_score, pe_buy, ce_sell, reason
-
-def has_cross_side_oi_confirm(side, flow_reason):
-    if side == "ce":
-        return "OI_BULL" in flow_reason
-    return "OI_BEAR" in flow_reason
-
-def early_oi_entry_ok(ts, side, pp, vp, flow_score, same_side_count, opp_side_count, flow_reason):
-    """
-    Optional 09:25-09:45 unlock for only the strongest OI buildup patterns.
-    This catches early CE_BUY + PE_SELL / PE_BUY + CE_SELL confirmation without
-    reopening weak gap-spike entries.
-    """
-    if not USE_EARLY_OI_ENTRY:
-        return False
-    if not (EARLY_ENTRY_START <= ts.time() < ENTRY_START):
-        return False
-    if EARLY_REQUIRE_CROSS_CONFIRM and not has_cross_side_oi_confirm(side, flow_reason):
-        return False
-    return (
-        flow_score >= EARLY_ENTRY_MIN_FLOW and
-        same_side_count >= EARLY_ENTRY_MIN_SAME_SIDE and
-        opp_side_count >= EARLY_ENTRY_MIN_OPP_SUPPORT and
-        pp >= EARLY_ENTRY_MIN_PRICE_PCT and
-        vp >= EARLY_ENTRY_MIN_VOLUME_PCT
-    )
-
-def same_side_entry_ok(side, same_side_count, opp_side_count, flow_reason):
-    if same_side_count >= MIN_SAME_SIDE_COUNT:
-        return True
-    if not RELAX_SAME_SIDE_ON_CROSS_CONFIRM:
-        return False
-    return (
-        same_side_count >= RELAXED_MIN_SAME_SIDE and
-        opp_side_count >= RELAXED_MIN_OPP_SUPPORT and
-        has_cross_side_oi_confirm(side, flow_reason)
-    )
 
 def strict_cross_snapshot(full, ts, strike, side):
     nearby = full[
@@ -1515,9 +813,9 @@ def strict_cross_entry_ok(full, ts, strike, side):
 
 def opposite_side(side):
     return "pe" if side == "ce" else "ce"
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # CORE FUNCTIONS
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 def _finite_pct(value):
     if value is None or pd.isna(value) or not np.isfinite(float(value)):
         return 0.0
@@ -1921,97 +1219,6 @@ def snapshot_analysis_column(ts, snapshot_analysis, line_no, width=24):
     return ""
 
 
-def analysis_entry_signal(info, side):
-    if not info:
-        return False, ""
-    side_u = side.upper()
-    opp_u = "CE" if side_u == "PE" else "PE"
-    observations = [str(x) for x in info.get("observations", [])]
-    timeframes = info.get("timeframes", [])
-    final_side = info.get("final_side")
-
-    side_dominant = final_side == side_u or any(tf_side == side_u and "dominant" in verdict for _, tf_side, verdict in timeframes)
-    opp_fading = any(f"{opp_u} fading" in verdict for _, _, verdict in timeframes)
-    side_accum = any(x.startswith(f"{side_u} accumulation") for x in observations)
-    side_gamma = any(x.startswith(f"{side_u} gamma confirms") for x in observations)
-    side_fading = any(f"{side_u} fading" in verdict for _, _, verdict in timeframes) or any(x.startswith(f"{side_u} weakening") for x in observations)
-
-    if side_fading:
-        return False, ""
-    if side_accum and (side_dominant or opp_fading):
-        reason = f"ANALYSIS_{side_u}: dominant"
-        if side_accum:
-            reason += " accumulation"
-        if side_gamma:
-            reason += " gamma"
-        if opp_fading:
-            reason += f" {opp_u}_fading"
-        return True, reason
-    return False, ""
-
-
-def analysis_exit_reason(info, side):
-    if not info:
-        return None
-    side_u = side.upper()
-    opp_u = "CE" if side_u == "PE" else "PE"
-    observations = [str(x) for x in info.get("observations", [])]
-    timeframes = info.get("timeframes", [])
-
-    side_fade_count = sum(1 for _, _, verdict in timeframes if f"{side_u} fading" in verdict)
-    if any(x.startswith(f"{side_u} weakening") for x in observations):
-        side_fade_count += 1
-    opp_dom_count = sum(1 for _, tf_side, verdict in timeframes if tf_side == opp_u and "dominant" in verdict)
-    if info.get("final_side") == opp_u:
-        opp_dom_count += 1
-    opp_accum = any(x.startswith(f"{opp_u} accumulation") or x.startswith(f"{opp_u} gamma confirms") for x in observations)
-
-    if side_fade_count >= 2 and opp_dom_count >= 2 and opp_accum:
-        return f"Exit: analysis {side_u} fading + {opp_u} taking over"
-    return None
-
-
-def build_analysis_entry_rows(full, snapshot_analysis, col_map):
-    rows = []
-    for ts, info in snapshot_analysis.items():
-        snap = full[full["timestamp"] == ts]
-        if snap.empty:
-            continue
-        for side in ("ce", "pe"):
-            analysis_ok, _ = analysis_entry_signal(info, side)
-            if not analysis_ok:
-                continue
-
-            cm = col_map[side]
-            candidates = snap.copy()
-            candidates["_entry_score"] = (
-                candidates[f"{side}_score"].fillna(0) * 0.7 +
-                candidates[f"{side}_p_pct"].fillna(0).clip(lower=-20, upper=80) * 2.0 +
-                candidates[f"{side}_v_pct"].fillna(0).clip(lower=-50, upper=300) * 0.25 +
-                candidates[f"{side}_d_pct"].fillna(0).abs().clip(upper=80) * 0.35 +
-                candidates[f"{side}_g_pct"].fillna(0).clip(lower=-50, upper=120) * 0.20
-            )
-
-            filtered = candidates[
-                (candidates[f"{side}_d_pct"] > 3) &
-                (candidates[f"{side}_p_pct"] > 1) &
-                (candidates[f"{side}_v_pct"] > 20) &
-                (candidates[f"{side}_g_pct"] > 0)
-            ]
-            if filtered.empty:
-                continue
-
-            r = filtered.sort_values("_entry_score", ascending=False).iloc[0]
-            rows.append((r["timestamp"], r["strike"], r["spot"], side,
-                         r[f"{side}_score"],
-                         r[cm["delta"]], r[f"{side}_d_pct"],
-                         r[cm["gamma"]], r[f"{side}_g_pct"],
-                         r[cm["volume"]], r[f"{side}_v_pct"],
-                         r[cm["price"]], r[f"{side}_p_pct"],
-                         r[cm["iv"]]))
-    return rows
-
-
 def pct_change_col(series):
     return (series.pct_change(fill_method=None) * 100).round(2)
 
@@ -2049,15 +1256,15 @@ def safe_float(x):
     except Exception:
         return None
 
-# ══════════════════════════════════════════════════════════════════════════════
-# XLSX EXPORT  — mimics console colours as cell fills / fonts
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# XLSX EXPORT  â€” mimics console colours as cell fills / fonts
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_cols, timestamps):
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side as XLSide
     from openpyxl.utils import get_column_letter
 
-    # ── Palette ───────────────────────────────────────────────────────────────
+    # â”€â”€ Palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     HDR_BG      = PatternFill("solid", start_color="1F4E79")
     HDR_FONT    = Font(name="Consolas", bold=True, color="FFFFFF", size=10)
     BODY_FONT   = Font(name="Consolas", size=9)
@@ -2088,7 +1295,7 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
         """Return (text_str, hex_color) for a pct value."""
         if val is None or (isinstance(val, float) and np.isnan(val)):
             return "n/a", C_DIM
-        sign = "▲" if val > 0 else "▼" if val < 0 else " "
+        sign = "â–²" if val > 0 else "â–¼" if val < 0 else " "
         txt  = f"{sign}{abs(val):.2f}%"
         if val > extreme:    clr = C_BRIGHT_GREEN
         elif val > 0:        clr = C_GREEN
@@ -2134,9 +1341,9 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
 
     wb = Workbook()
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # SHEET 1 — LAYER 1  Same-Candle Spikes
-    # ══════════════════════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # SHEET 1 â€” LAYER 1  Same-Candle Spikes
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     ws1 = wb.active
     ws1.title       = "L1 Same-Candle Spikes"
     ws1.sheet_view.showGridLines = False
@@ -2176,9 +1383,9 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
     ws1.freeze_panes = "A2"
     autofit(ws1)
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # SHEET 2 — LAYER 2  Cross-Candle Trend
-    # ══════════════════════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # SHEET 2 â€” LAYER 2  Cross-Candle Trend
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     ws2 = wb.create_sheet("L2 Cross-Candle Trend")
     ws2.sheet_view.showGridLines = False
     ws2.sheet_properties.tabColor = "00BFFF"
@@ -2212,9 +1419,9 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
     ws2.freeze_panes = "A2"
     autofit(ws2)
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # SHEET 3 — LAYER 3  Cross-Strike Confirmation
-    # ══════════════════════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # SHEET 3 â€” LAYER 3  Cross-Strike Confirmation
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     ws3 = wb.create_sheet("L3 Cross-Strike Confirm")
     ws3.sheet_view.showGridLines = False
     ws3.sheet_properties.tabColor = "9900FF"
@@ -2267,9 +1474,9 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
     ws3.freeze_panes = "A2"
     autofit(ws3)
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # SHEET 4 — LAYER 4  Opposite-Side Weak Confirmation
-    # ══════════════════════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # SHEET 4 â€” LAYER 4  Opposite-Side Weak Confirmation
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     ws4 = wb.create_sheet("L4 Opp-Side Confirm")
     ws4.sheet_view.showGridLines = False
     ws4.sheet_properties.tabColor = "FF4500"
@@ -2284,7 +1491,7 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
         is_bull   = "BULL" in sig_clean
         row_bg    = "1A3A1A" if is_bull else "3A1A1A"
         sig_c     = C_BRIGHT_GREEN if is_bull else C_BRIGHT_RED
-        sig_txt   = "▲ BULLISH CONFIRM" if is_bull else "▼ BEARISH CONFIRM"
+        sig_txt   = "â–² BULLISH CONFIRM" if is_bull else "â–¼ BEARISH CONFIRM"
 
         ce_dp_t, ce_dp_c = pct_color(safe_float(ce_dp))
         ce_gp_t, ce_gp_c = pct_color(safe_float(ce_gp))
@@ -2306,9 +1513,9 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
     ws4.freeze_panes = "A2"
     autofit(ws4)
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # SHEET 5 — Full Data
-    # ══════════════════════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # SHEET 5 â€” Full Data
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     ws_fd = wb.create_sheet("Full Data")
     ws_fd.sheet_view.showGridLines = False
     ws_fd.sheet_properties.tabColor = "444444"
@@ -2332,15 +1539,15 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
     ws_fd.freeze_panes = "A2"
     autofit(ws_fd)
 
-    # ══════════════════════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     # Set dark background for all sheets' tab area via sheet background
-    # ══════════════════════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     wb.save(OUT_XLSX)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # MAIN
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 def run_single_analysis(csv_path=None, analysis_date=None):
     csv_path = csv_path or CSV_PATH
     analysis_date = analysis_date or ANALYSIS_DATE
@@ -2349,7 +1556,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     if not csv.exists():
         raise FileNotFoundError(f"CSV not found: {csv_path}\nRun 1_db_to_csv.py first.")
 
-    print(bold(cyan(f"\n  Loading {csv_path} …")))
+    print(bold(cyan(f"\n  Loading {csv_path} â€¦")))
     df = pd.read_csv(csv, parse_dates=["timestamp"])
     print("CSV date range:", df["timestamp"].min(), "to", df["timestamp"].max())
 
@@ -2379,13 +1586,13 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     df.sort_values(["timestamp", "strike"], inplace=True)
     df.reset_index(drop=True, inplace=True)
 
-    # ── Session time filter ───────────────────────────────────────────────────
+    # â”€â”€ Session time filter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     before = len(df)
 
     df = df[df["timestamp"].dt.time.between(SESSION_START, SESSION_END)].copy()
     df.reset_index(drop=True, inplace=True)
 
-    # Keep only ATM ±100 points for each timestamp
+    # Keep only ATM Â±100 points for each timestamp
     df["atm_strike"] = (df["spot"] / STRIKE_STEP).round() * STRIKE_STEP
 
     df = df[
@@ -2396,8 +1603,8 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     df.drop(columns=["atm_strike"], inplace=True)
     df.reset_index(drop=True, inplace=True)
     after  = len(df)
-    print(f"  {dim('Time filter:')} {SESSION_START.strftime('%H:%M')} – {SESSION_END.strftime('%H:%M')}  "
-          f"{dim('Rows:')} {before:,} → {bright_green(str(after))}")
+    print(f"  {dim('Time filter:')} {SESSION_START.strftime('%H:%M')} â€“ {SESSION_END.strftime('%H:%M')}  "
+          f"{dim('Rows:')} {before:,} â†’ {bright_green(str(after))}")
 
     sides   = ["ce","pe"] if SIDE == "both" else [SIDE]
     col_map = {
@@ -2412,9 +1619,9 @@ def run_single_analysis(csv_path=None, analysis_date=None):
           f"{dim('Sides:')} {SIDE.upper()}  "
           f"{dim('OI print interval:')} {OI_PRINT_INTERVAL}  "
           f"{dim('X-candle window:')} {CROSS_CANDLES}  "
-          f"{dim('Nearby strikes:')} ±{STRIKES_NEARBY}\n")
+          f"{dim('Nearby strikes:')} Â±{STRIKES_NEARBY}\n")
 
-    # ── Per-strike feature engineering ───────────────────────────────────────
+    # â”€â”€ Per-strike feature engineering â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     all_strikes = sorted(df["strike"].unique())
     records     = []
 
@@ -2510,11 +1717,11 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     W  = 177   # console width - wide enough for all columns plus compact snapshot analysis
     W3 = W + STRIKES_NEARBY * 14
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # LAYER 1 — SAME-CANDLE SPIKE REPORT
-    # ══════════════════════════════════════════════════════════════════════════
-    header(f"SNAPSHOT OI BUILDUP — every {OI_PRINT_INTERVAL}, CE first then PE", W)
-    print(f"  {dim('Layer 1 threshold: runtime percentile ≥')} {bold(str(STRENGTH_PCT))}th\n")
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # LAYER 1 â€” SAME-CANDLE SPIKE REPORT
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    header(f"SNAPSHOT OI BUILDUP â€” every {OI_PRINT_INTERVAL}, CE first then PE", W)
+    print(f"  {dim('Layer 1 threshold: runtime percentile â‰¥')} {bold(str(STRENGTH_PCT))}th\n")
 
     print(
         f"  {dim('Also showing price-volume buildup rows: P% >=')} "
@@ -2558,16 +1765,10 @@ def run_single_analysis(csv_path=None, analysis_date=None):
                                 r[col_map[side]["price"]], r[f"{side}_p_pct"],
                                 r[col_map[side]["iv"]]))
 
-    # Same timestamp → all CE first → all PE next
+    # Same timestamp â†’ all CE first â†’ all PE next
     snapshot_rows.sort(key=lambda x: (x[0], 0 if x[3] == "ce" else 1, x[1]))
     layer1_rows.sort(key=lambda x: (x[0], 0 if x[3] == "ce" else 1, x[1]))
-    analysis_entry_rows = build_analysis_entry_rows(full, snapshot_analysis, col_map)
-    layer1_keys = {(r[0], float(r[1]), r[3]) for r in layer1_rows}
-    analysis_entry_rows = [
-        r for r in analysis_entry_rows
-        if (r[0], float(r[1]), r[3]) not in layer1_keys
-    ]
-    entry_source_rows = layer1_rows + analysis_entry_rows
+    entry_source_rows = layer1_rows
     entry_source_rows.sort(key=lambda x: (x[0], 0 if x[3] == "ce" else 1, x[1]))
 
     prev_snapshot_ts = None
@@ -2601,32 +1802,14 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         print(f"  {dim('No snapshot rows found.')}")
     sep(W)
 
-    # TOP ENTRIES TABLE — best entry candles from Layer 1 data
+    # TOP ENTRIES TABLE â€” best entry candles from Layer 1 data
     # Logic: delta up + gamma up + volume up + price up
     # Extra rule: one best row per timestamp, so duplicate same-time entries are removed
-    # ══════════════════════════════════════════════════════════════════════════
-    header("TOP ENTRIES — Delta + Gamma + Volume + Price increasing", W)
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    header("TOP ENTRIES â€” Delta + Gamma + Volume + Price increasing", W)
     pe_total = 0
-    pe_gamma_reject = 0
-    pe_overextended_reject = 0
-    pe_flow_reject = 0
-    pe_strength_reject = 0
+    pe_strict_reject = 0
     pe_pass = 0
-    ce_ma_reject = 0
-    pe_ma_reject = 0
-    ma_missing_count = 0
-    ce_fast_ema_reject = 0
-    pe_fast_ema_reject = 0
-    fast_ema_missing_count = 0
-    chop_reject = 0
-    chop_missing_count = 0
-    momentum_override_count = 0
-    weak_momentum_override_reject = 0
-    entry_start_reject = 0
-    early_entry_accept_count = 0
-    low_flow_reject = 0
-    low_same_side_reject = 0
-    late_flow_reject = 0
     top_rows = []
 
     for row in entry_source_rows:
@@ -2643,143 +1826,17 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         if ts.time() >= ENTRY_CUTOFF:
             continue
 
-        momentum_ok, momentum_reason = price_momentum_override(r, side, pp)
-
-        flow_score, same_side_count, opp_side_count, flow_reason = get_flow_confirm(
-            full, ts, stk, side
-        )
-        analysis_ok, analysis_reason = analysis_entry_signal(snapshot_analysis.get(ts), side)
-        early_entry_ok = early_oi_entry_ok(
-            ts, side, pp, vp, flow_score, same_side_count, opp_side_count, flow_reason
-        )
-
-        if ts.time() < ENTRY_START and not early_entry_ok:
-            entry_start_reject += 1
-            continue
-
-        if early_entry_ok:
-            early_entry_accept_count += 1
-
-        ma_ok, ma_reason = passes_nifty_200ma_filter(r, side)
-        if ma_reason == "MA missing":
-            ma_missing_count += 1
-        if not ma_ok and not (momentum_ok or early_entry_ok or analysis_ok):
-            if side == "ce":
-                ce_ma_reject += 1
-            else:
-                pe_ma_reject += 1
-            continue
-
-        fast_ema_ok, fast_ema_reason = passes_fast_ema_direction_filter(r, side)
-        if fast_ema_reason == "EMA missing":
-            fast_ema_missing_count += 1
-        if not fast_ema_ok and not analysis_ok:
-            if side == "ce":
-                ce_fast_ema_reject += 1
-            else:
-                pe_fast_ema_reject += 1
-            continue
-
-        chop_ok, chop_reason = passes_nifty_chop_filter(r)
-        if chop_reason == "MA/chop missing":
-            chop_missing_count += 1
-        if not chop_ok and not (momentum_ok or early_entry_ok or analysis_ok):
-            chop_reject += 1
-            continue
-
-        if momentum_ok and (not ma_ok or not chop_ok):
-            momentum_override_count += 1
-
-        # reject already extended candles
-        if r[f"{side}_overextended"] and not (ALLOW_PRICE_MOMENTUM_OVEREXTENDED and momentum_ok):
-            if side == "pe":
-                pe_overextended_reject += 1
-            continue
-
-        # avoid gamma-negative entries
-        if gp <= 0:
-            if side == "pe":
-                pe_gamma_reject += 1
-            continue
-
-        # Price momentum can override 200MA/chop only when the option move is
-        # supported by nearby strikes. This avoids one-candle P% spikes that
-        # show high price momentum but later produce tiny BEST and deep BAD.
-        momentum_override_used = momentum_ok and (not ma_ok or not chop_ok)
-        if STRICT_MOMENTUM_OVERRIDE_QUALITY and momentum_override_used and not (early_entry_ok or analysis_ok):
-            momentum_quality_ok = (
-                flow_score >= MOMENTUM_OVERRIDE_MIN_FLOW and
-                same_side_count >= MOMENTUM_OVERRIDE_MIN_SAME_SIDE and
-                opp_side_count >= MOMENTUM_OVERRIDE_MIN_OPP_SUPPORT and
-                momentum_override_slope_ok(r, side)
-            )
-            if not momentum_quality_ok:
-                weak_momentum_override_reject += 1
-                continue
-
-        if side == "ce":
-            delta_ok = dp > 3
-        else:
-            delta_ok = dp > 3
-
-        price_ok = pp > 1
-        volume_ok = vp > 30
-        flow_ok = flow_score >= MIN_ENTRY_FLOW_SCORE
         strict_entry_ok, strict_entry_score, strict_entry_reason = strict_cross_entry_ok(
             full, ts, stk, side
         )
-        analysis_quality_ok = (
-            analysis_ok and
-            dp > 3 and
-            pp > 1 and
-            vp > 20 and
-            gp > 0 and
-            flow_ok and
-            same_side_entry_ok(side, same_side_count, opp_side_count, flow_reason)
-        )
-
-        if ts.time() >= LATE_ENTRY_START and flow_score < LATE_ENTRY_MIN_FLOW and not analysis_ok:
-            late_flow_reject += 1
-            continue
-
-        strong_checks = [
-            delta_ok,
-            volume_ok,
-            price_ok,
-            flow_ok
-        ]
-        if side == "pe" and not flow_ok:
-            pe_flow_reject += 1
-
-        if not flow_ok:
-            low_flow_reject += 1
-
-        same_side_ok = same_side_entry_ok(side, same_side_count, opp_side_count, flow_reason)
-
-        if not same_side_ok:
-            low_same_side_reject += 1
-
-        entry_allowed = (
-            strict_entry_ok
-            if USE_STRICT_CROSS_ENTRY
-            else ((sum(strong_checks) >= 3 and same_side_ok) or analysis_quality_ok)
-        )
+        entry_allowed = strict_entry_ok
 
         if entry_allowed:
 
             if side == "pe":
                 pe_pass += 1
             
-            entry_score = (
-                abs(dp) * 0.25 +
-                min(vp, 500) * 0.35 +
-                pp * 0.30 +
-                flow_score * 4
-            )
-            if analysis_ok:
-                entry_score += 75
-            if strict_entry_ok:
-                entry_score += 100 + strict_entry_score
+            entry_score = 100 + strict_entry_score + abs(dp) + min(max(vp, 0), 500) * 0.10 + max(pp, 0)
 
             entry_price = pv  # option buy price at entry candle
 
@@ -2790,13 +1847,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
                 side,
                 entry_price,
                 col_map,
-                momentum_entry=momentum_ok,
-                analysis_entry=analysis_quality_ok,
-                flow_score=flow_score,
-                same_side_count=same_side_count,
-                opp_side_count=opp_side_count,
-                snapshot_analysis=snapshot_analysis,
-                strict_entry=strict_entry_ok,
+                strict_entry=True,
             )
 
             entry_price = pv
@@ -2820,23 +1871,12 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             bad_move, bad_time, bad_price,
             entry_score, score, dp, gp, vp, pp,
             exit_reason,
-            f"{sum(strong_checks)}/4 FLOW={flow_score} CHOP={chop_score} "
-            f"F200={int(bool(r.get('flat200', False)))} "
-            f"F20={int(bool(r.get('flat20', False)))} "
-            f"F50={int(bool(r.get('flat50', False)))} "
-            f"N20={int(float(r.get('nifty_close', np.nan)) >= float(r.get('ema20', np.nan)) if not pd.isna(r.get('nifty_close', np.nan)) and not pd.isna(r.get('ema20', np.nan)) else 0)} "
-            f"N50={int(float(r.get('nifty_close', np.nan)) >= float(r.get('ema50', np.nan)) if not pd.isna(r.get('nifty_close', np.nan)) and not pd.isna(r.get('ema50', np.nan)) else 0)} "
-            f"COMP={int(bool(r.get('ma_compression', False)))} "
-            f"X={ema_crosses} "
-            f"{'ANALYSIS_ENTRY ' + analysis_reason if analysis_ok else ''} "
-            f"{'STRICT_ENTRY ' + strict_entry_reason if strict_entry_ok else strict_entry_reason if USE_STRICT_CROSS_ENTRY else ''} "
-            f"{momentum_reason if momentum_ok else ''} "
-            f"{'EARLY_OI' if early_entry_ok else ''} {flow_reason}"
+            f"STRICT_ENTRY {strict_entry_reason} STOP={STOP_LOSS_PTS}"
             ))
         
         else:
             if side == "pe":
-                pe_strength_reject += 1 
+                pe_strict_reject += 1
 
     # First sort by ENTRY SCORE so duplicate same-time signals keep the strongest row.
     top_rows.sort(key=lambda x: x[14], reverse=True)
@@ -2855,145 +1895,41 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     # Print entries in proper time order, not score order.
     unique_rows.sort(key=lambda x: x[0])
     overlapping_skip_count = 0
-    daily_loss_reentry_skip_count = 0
-
     if not ALLOW_OVERLAPPING_TRADES:
         single_trade_rows = []
         active_until = None
-        analysis_reentry_block_until = {"ce": None, "pe": None}
-        last_analysis_side = None
-        last_analysis_exit_ts = None
-        last_analysis_exit_reason = ""
-        daily_loss_count = {}
 
         for r in unique_rows:
             entry_ts = r[0]
-            side = r[3]
             exit_ts = r[5]
-            pnl_points = r[7]
-            exit_reason = str(r[20])
-            trade_day = entry_ts.date()
 
             if active_until is not None and entry_ts <= active_until:
                 overlapping_skip_count += 1
                 continue
 
-            block_until = analysis_reentry_block_until.get(side)
-            if block_until is not None and entry_ts < block_until:
-                overlapping_skip_count += 1
-                continue
-
-            is_analysis_entry = "ANALYSIS_ENTRY" in str(r[21])
-            if (
-                is_analysis_entry and
-                last_analysis_side is not None and
-                side != last_analysis_side and
-                last_analysis_exit_ts is not None and
-                entry_ts < last_analysis_exit_ts + pd.Timedelta(minutes=60)
-            ):
-                last_side_u = last_analysis_side.upper()
-                side_u = side.upper()
-                handoff_text = f"analysis {last_side_u} fading + {side_u} taking over"
-                if handoff_text not in last_analysis_exit_reason:
-                    overlapping_skip_count += 1
-                    continue
-
-            if (
-                daily_loss_count.get(trade_day, 0) >= DAILY_LOSS_LIMIT and
-                entry_ts.time() >= DAILY_LOSS_CUTOFF
-            ):
-                daily_loss_reentry_skip_count += 1
-                continue
-
             single_trade_rows.append(r)
             active_until = exit_ts if exit_ts is not None and not pd.isna(exit_ts) else entry_ts
-            if exit_ts is not None and not pd.isna(exit_ts):
-                if "analysis PE fading + CE taking over" in exit_reason:
-                    analysis_reentry_block_until["pe"] = exit_ts + pd.Timedelta(minutes=180)
-                    if pnl_points is not None and not pd.isna(pnl_points) and float(pnl_points) >= 50:
-                        analysis_reentry_block_until["ce"] = exit_ts + pd.Timedelta(minutes=240)
-                        analysis_reentry_block_until["pe"] = exit_ts + pd.Timedelta(minutes=240)
-                elif "analysis CE fading + PE taking over" in exit_reason:
-                    analysis_reentry_block_until["ce"] = exit_ts + pd.Timedelta(minutes=180)
-                    if pnl_points is not None and not pd.isna(pnl_points) and float(pnl_points) >= 50:
-                        analysis_reentry_block_until["ce"] = exit_ts + pd.Timedelta(minutes=240)
-                        analysis_reentry_block_until["pe"] = exit_ts + pd.Timedelta(minutes=240)
-                elif "profit book" in exit_reason:
-                    analysis_reentry_block_until["ce"] = exit_ts + pd.Timedelta(minutes=90)
-                    analysis_reentry_block_until["pe"] = exit_ts + pd.Timedelta(minutes=90)
-            if is_analysis_entry:
-                last_analysis_side = side
-                last_analysis_exit_ts = exit_ts if exit_ts is not None and not pd.isna(exit_ts) else entry_ts
-                last_analysis_exit_reason = exit_reason
-            if pnl_points is not None and not pd.isna(pnl_points) and float(pnl_points) < 0:
-                daily_loss_count[trade_day] = daily_loss_count.get(trade_day, 0) + 1
 
         unique_rows = single_trade_rows
 
-    if USE_NIFTY_200MA_FILTER:
-        print(f"  {dim('NIFTY 200 MA filter:')} {bold('ON')}   "
-              f"{dim('CE blocked below MA:')} {bold(str(ce_ma_reject))}   "
-              f"{dim('PE blocked above MA:')} {bold(str(pe_ma_reject))}   "
-              f"{dim('MA missing:')} {bold(str(ma_missing_count))}")
-    else:
-        print(f"  {dim('NIFTY 200 MA filter:')} {bold('OFF')}")
-    if USE_FAST_EMA_DIRECTION_FILTER:
-        print(f"  {dim('Fast EMA direction filter:')} {bold('ON')}   "
-              f"{dim('CE blocked below 20/50:')} {bold(str(ce_fast_ema_reject))}   "
-              f"{dim('PE blocked above 20/50:')} {bold(str(pe_fast_ema_reject))}   "
-              f"{dim('EMA missing:')} {bold(str(fast_ema_missing_count))}")
-    else:
-        print(f"  {dim('Fast EMA direction filter:')} {bold('OFF')}")
-    if USE_NIFTY_CHOP_FILTER:
-        print(f"  {dim('NIFTY chop filter:')} {bold('ON')}   "
-              f"{dim('Threshold:')} {bold(str(CHOP_SCORE_THRESHOLD))}   "
-              f"{dim('Blocked entries:')} {bold(str(chop_reject))}   "
-              f"{dim('Chop missing:')} {bold(str(chop_missing_count))}")
-    else:
-        print(f"  {dim('NIFTY chop filter:')} {bold('OFF')}")
-    if USE_PRICE_MOMENTUM_OVERRIDE:
-        print(f"  {dim('Price momentum override:')} {bold('ON')}   "
-              f"{dim('P% >=')} {bold(str(PRICE_MOMENTUM_ENTRY_PCT))}   "
-              f"{dim('MA/chop overrides used:')} {bold(str(momentum_override_count))}   "
-              f"{dim('Weak overrides blocked:')} {bold(str(weak_momentum_override_reject))}")
-    else:
-        print(f"  {dim('Price momentum override:')} {bold('OFF')}")
-    print(f"  {dim('Entry quality filters:')} {bold('ON')}   "
-          f"{dim('Start >=')} {bold(ENTRY_START.strftime('%H:%M'))}   "
-          f"{dim('Flow >=')} {bold(str(MIN_ENTRY_FLOW_SCORE))}   "
-          f"{dim('Same-side >=')} {bold(str(MIN_SAME_SIDE_COUNT))}   "
-          f"{dim('Open blocked:')} {bold(str(entry_start_reject))}   "
-          f"{dim('Low flow blocked:')} {bold(str(low_flow_reject))}   "
-          f"{dim('Low same-side blocked:')} {bold(str(low_same_side_reject))}   "
-          f"{dim('Late low-flow blocked:')} {bold(str(late_flow_reject))}")
-    if USE_STRICT_CROSS_ENTRY:
-        print(f"  {dim('Strict cross entry:')} {bold('ON')}   "
-              f"{dim('V% >=')} {bold(str(STRICT_MIN_VOLUME_PCT))}   "
-              f"{dim('D% >=')} {bold(str(STRICT_MIN_DELTA_PCT))}   "
-              f"{dim('P% >=')} {bold(str(STRICT_MIN_PRICE_PCT))}   "
-              f"{dim('Same/Opp >=')} {bold(str(STRICT_MIN_SAME_STRIKES) + '/' + str(STRICT_MIN_OPP_STRIKES))}   "
-              f"{dim('Confirm:')} {bold(str(STRICT_MIN_CONFIRM_BARS) + '/' + str(STRICT_CONFIRM_WINDOW))}   "
-              f"{dim('Exit bars:')} {bold(str(STRICT_EXIT_CONFIRM_BARS))}")
-    else:
-        print(f"  {dim('Strict cross entry:')} {bold('OFF')}")
-    if USE_EARLY_OI_ENTRY:
-        print(f"  {dim('Early OI entry:')} {bold('ON')}   "
-              f"{dim('Window:')} {bold(EARLY_ENTRY_START.strftime('%H:%M') + '-' + ENTRY_START.strftime('%H:%M'))}   "
-              f"{dim('Flow >=')} {bold(str(EARLY_ENTRY_MIN_FLOW))}   "
-              f"{dim('Same/Opp >=')} {bold(str(EARLY_ENTRY_MIN_SAME_SIDE) + '/' + str(EARLY_ENTRY_MIN_OPP_SUPPORT))}   "
-              f"{dim('P% >=')} {bold(str(EARLY_ENTRY_MIN_PRICE_PCT))}   "
-              f"{dim('V% >=')} {bold(str(EARLY_ENTRY_MIN_VOLUME_PCT))}   "
-              f"{dim('Cross confirm:')} {bold('ON' if EARLY_REQUIRE_CROSS_CONFIRM else 'OFF')}   "
-              f"{dim('Accepted:')} {bold(str(early_entry_accept_count))}")
-    else:
-        print(f"  {dim('Early OI entry:')} {bold('OFF')}")
+    print(f"  {dim('Entry model:')} {bold('STRICT CROSS-STRIKE ONLY')}   "
+          f"{dim('Stop loss:')} {bold(str(STOP_LOSS_PTS) + ' pts')}   "
+          f"{dim('Force exit:')} {bold(FORCE_EXIT.strftime('%H:%M'))}")
+    print(f"  {dim('Entry criteria:')} "
+          f"{dim('own side D/P/V strength + opposite side D/P weakness; repeated confirmation must strengthen')}")
+    print(f"  {dim('Strict params:')} "
+          f"{dim('V% >=')} {bold(str(STRICT_MIN_VOLUME_PCT))}   "
+          f"{dim('D% >=')} {bold(str(STRICT_MIN_DELTA_PCT))}   "
+          f"{dim('P% >=')} {bold(str(STRICT_MIN_PRICE_PCT))}   "
+          f"{dim('Same/Opp >=')} {bold(str(STRICT_MIN_SAME_STRIKES) + '/' + str(STRICT_MIN_OPP_STRIKES))}   "
+          f"{dim('Confirm:')} {bold(str(STRICT_MIN_CONFIRM_BARS) + '/' + str(STRICT_CONFIRM_WINDOW))}   "
+          f"{dim('Exit bars:')} {bold(str(STRICT_EXIT_CONFIRM_BARS))}")
     if ALLOW_OVERLAPPING_TRADES:
         print(f"  {dim('Single active trade rule:')} {bold('OFF')}   "
               f"{dim('Overlapping entries allowed')}")
     else:
         print(f"  {dim('Single active trade rule:')} {bold('ON')}   "
-              f"{dim('Overlapping entries skipped:')} {bold(str(overlapping_skip_count))}   "
-              f"{dim('Daily loss re-entry skipped:')} {bold(str(daily_loss_reentry_skip_count))}")
+              f"{dim('Overlapping entries skipped:')} {bold(str(overlapping_skip_count))}")
     print()
 
     h_top = (
@@ -3029,7 +1965,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
 
     if pe_rows:
         print()
-        header("PE ENTRIES ONLY — same format", W)
+        header("PE ENTRIES ONLY â€” same format", W)
         print(bold(h_top))
         sep(W)
 
@@ -3059,20 +1995,18 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         print(f"  {dim('No top entries found.')}")
 
     sep(W)
-    print("\n========== PE DEBUG ==========")
-    print("PE Layer1 rows         :", pe_total)
-    print("PE overextended reject :", pe_overextended_reject)
-    print("PE gamma reject        :", pe_gamma_reject)
-    print("PE flow reject         :", pe_flow_reject)
-    print("PE strength reject     :", pe_strength_reject)
-    print("PE final entries       :", pe_pass)
-    print("==============================")
+    print("\n========== STRICT ENTRY DEBUG ==========")
+    print("PE candidate rows      :", pe_total)
+    print("PE strict rejected     :", pe_strict_reject)
+    print("PE strict accepted     :", pe_pass)
+    print("Overlapping skipped    :", overlapping_skip_count)
+    print("========================================")
 
 
     
-    # ══════════════════════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     # SUMMARY
-    # ══════════════════════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     header("SUMMARY", W)
 
     option_pnls = [
@@ -3086,8 +2020,8 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     avg_option_pnl = round(total_option_pnl / len(option_pnls), 2) if option_pnls else 0.0
 
     # Summary after removing Layer 2, Layer 3, Layer 4 tables
-    print(f"  {dim('Session window              :')} {bold(SESSION_START.strftime('%H:%M'))} – {bold(SESSION_END.strftime('%H:%M'))}")
-    print(f"  {dim('Layer 1 — Same-candle spikes:')} {bold(str(len(layer1_rows)))}")
+    print(f"  {dim('Session window              :')} {bold(SESSION_START.strftime('%H:%M'))} â€“ {bold(SESSION_END.strftime('%H:%M'))}")
+    print(f"  {dim('Layer 1 â€” Same-candle spikes:')} {bold(str(len(layer1_rows)))}")
     print(f"  {dim('Top entries shown           :')} {bold(str(min(len(unique_rows), TOP_N)))}")
     print(f"  {dim('Option trades total         :')} {bold(str(len(option_pnls)))}")
     print(f"  {dim('Option profit count         :')} {bold(str(profit_count))}")
@@ -3099,7 +2033,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     print(f"  {dim('Option average PNL          :')} {bold(avg_pnl_txt)}")
     print()
 
-    # ── Save CSV ──────────────────────────────────────────────────────────────
+    # â”€â”€ Save CSV â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     save_cols = ["timestamp","strike","spot"]
     for side in sides:
         cm = col_map[side]
@@ -3176,71 +2110,34 @@ def parse_args():
                         help="Snapshot OI buildup print interval: 5min default, or 1min to print every candle.")
     parser.add_argument("--no-next-week", action="store_true",
                         help="Monthly mode: do not include first 7 days of next month.")
-    parser.add_argument("--entry-start", type=parse_time_arg,
-                        help="Normal entry start time, HH:MM. Default from USER CONFIG: 09:45.")
-    parser.add_argument("--flow", "--min-flow", dest="min_flow", type=int,
-                        help="Minimum entry FLOW score. Default from USER CONFIG: 10.")
-    parser.add_argument("--same-side", "--min-same-side", dest="min_same_side", type=int,
-                        help="Minimum same-side confirming strikes. Default from USER CONFIG: 2.")
-    parser.add_argument("--late-start", type=parse_time_arg,
-                        help="Late-entry stricter flow start time, HH:MM. Default: 14:15.")
-    parser.add_argument("--late-flow", type=int,
-                        help="Minimum FLOW after --late-start. Default: 12.")
-    parser.add_argument("--early-entry", action="store_true",
-                        help="Enable 09:25-09:45 super-strong OI buildup entries.")
-    parser.add_argument("--early-start", type=parse_time_arg,
-                        help="Early OI entry start time, HH:MM. Default: 09:25.")
-    parser.add_argument("--early-flow", type=int,
-                        help="Minimum FLOW for early OI entries. Default: 16.")
-    parser.add_argument("--early-same-side", type=int,
-                        help="Minimum same-side strikes for early OI entries. Default: 3.")
-    parser.add_argument("--early-opp", type=int,
-                        help="Minimum opposite-side support strikes for early OI entries. Default: 2.")
-    parser.add_argument("--early-price-pct", type=float,
-                        help="Minimum option price %% for early OI entries. Default: 6.")
-    parser.add_argument("--early-volume-pct", type=float,
-                        help="Minimum option volume %% for early OI entries. Default: 40.")
-    parser.add_argument("--early-no-cross-confirm", action="store_true",
-                        help="Early entries can use strong same-side flow even without OI_BULL/OI_BEAR.")
-    parser.add_argument("--no-relax-cross-side", action="store_true",
-                        help="Disable relaxed same-side rule when OI_BULL/OI_BEAR has opposite-side support.")
-    parser.add_argument("--strict-cross-entry", action="store_true",
-                        help="Enable stricter entry/exit logic using repeated cross-strike volume/delta/price confirmation.")
     parser.add_argument("--strict-volume-pct", type=float,
-                        help="Strict mode minimum own-side volume percentage. Default: 80.")
+                        help="Minimum own-side volume percentage. Default: 80.")
     parser.add_argument("--strict-delta-pct", type=float,
-                        help="Strict mode minimum own-side delta percentage and opposite-side delta drop. Default: 2.")
+                        help="Minimum own-side delta percentage and opposite-side delta drop. Default: 2.")
     parser.add_argument("--strict-price-pct", type=float,
-                        help="Strict mode minimum own-side price percentage and opposite-side price drop. Default: 3.")
+                        help="Minimum own-side price percentage and opposite-side price drop. Default: 3.")
     parser.add_argument("--strict-same-strikes", type=int,
-                        help="Strict mode minimum confirming same-side nearby strikes. Default: 3.")
+                        help="Minimum confirming same-side nearby strikes. Default: 3.")
     parser.add_argument("--strict-opp-strikes", type=int,
-                        help="Strict mode minimum confirming opposite-side nearby strikes. Default: 2.")
+                        help="Minimum confirming opposite-side nearby strikes. Default: 2.")
     parser.add_argument("--strict-window", type=int,
-                        help="Strict mode recent snapshot window. Default: 5.")
+                        help="Recent snapshot confirmation window. Default: 5.")
     parser.add_argument("--strict-confirm-bars", type=int,
-                        help="Strict mode minimum confirmations inside the window. Default: 3.")
+                        help="Minimum confirmations inside the window. Default: 3.")
     parser.add_argument("--strict-exit-bars", type=int,
-                        help="Strict mode opposite-side confirmations needed to exit. Default: 2.")
+                        help="Opposite-side confirmations needed to exit. Default: 2.")
     parser.add_argument("--strict-require-volume", action="store_true",
-                        help="Strict mode requires volume threshold on own-side confirmations; otherwise delta+price with non-negative volume can count.")
+                        help="Require volume threshold on own-side confirmations; otherwise delta+price with non-negative volume can count.")
     parser.add_argument("--console-xlsx", nargs="?", const=OUT_CONSOLE_XLSX,
                         help="Dump the exact colored console output to an Excel file. "
                              f"Default file: {OUT_CONSOLE_XLSX}.")
     return parser.parse_args()
 
 def apply_arg_config(args):
-    global ENTRY_START, MIN_ENTRY_FLOW_SCORE, MIN_SAME_SIDE_COUNT
-    global LATE_ENTRY_START, LATE_ENTRY_MIN_FLOW
-    global USE_EARLY_OI_ENTRY, EARLY_ENTRY_START, EARLY_ENTRY_MIN_FLOW
-    global EARLY_ENTRY_MIN_SAME_SIDE, EARLY_ENTRY_MIN_OPP_SUPPORT
-    global EARLY_ENTRY_MIN_PRICE_PCT, EARLY_ENTRY_MIN_VOLUME_PCT
-    global EARLY_REQUIRE_CROSS_CONFIRM
-    global RELAX_SAME_SIDE_ON_CROSS_CONFIRM
     global NIFTY_DATA_MODE, NIFTY_1MIN_PATH, _NIFTY_200MA_CACHE
     global OI_DATA_MODE
     global OI_PRINT_INTERVAL
-    global USE_STRICT_CROSS_ENTRY, STRICT_MIN_VOLUME_PCT, STRICT_MIN_DELTA_PCT
+    global STRICT_MIN_VOLUME_PCT, STRICT_MIN_DELTA_PCT
     global STRICT_MIN_PRICE_PCT, STRICT_MIN_SAME_STRIKES, STRICT_MIN_OPP_STRIKES
     global STRICT_CONFIRM_WINDOW, STRICT_MIN_CONFIRM_BARS, STRICT_ALLOW_VOLUME_NEUTRAL
     global STRICT_EXIT_CONFIRM_BARS
@@ -3251,37 +2148,6 @@ def apply_arg_config(args):
     NIFTY_1MIN_PATH = LIVE_NIFTY_1MIN_PATH if args.nifty_data == "live" else BACK_NIFTY_1MIN_PATH
     _NIFTY_200MA_CACHE = None
 
-    if args.entry_start is not None:
-        ENTRY_START = args.entry_start
-    if args.min_flow is not None:
-        MIN_ENTRY_FLOW_SCORE = args.min_flow
-    if args.min_same_side is not None:
-        MIN_SAME_SIDE_COUNT = args.min_same_side
-    if args.late_start is not None:
-        LATE_ENTRY_START = args.late_start
-    if args.late_flow is not None:
-        LATE_ENTRY_MIN_FLOW = args.late_flow
-
-    if args.early_entry:
-        USE_EARLY_OI_ENTRY = True
-    if args.early_start is not None:
-        EARLY_ENTRY_START = args.early_start
-    if args.early_flow is not None:
-        EARLY_ENTRY_MIN_FLOW = args.early_flow
-    if args.early_same_side is not None:
-        EARLY_ENTRY_MIN_SAME_SIDE = args.early_same_side
-    if args.early_opp is not None:
-        EARLY_ENTRY_MIN_OPP_SUPPORT = args.early_opp
-    if args.early_price_pct is not None:
-        EARLY_ENTRY_MIN_PRICE_PCT = args.early_price_pct
-    if args.early_volume_pct is not None:
-        EARLY_ENTRY_MIN_VOLUME_PCT = args.early_volume_pct
-    if args.early_no_cross_confirm:
-        EARLY_REQUIRE_CROSS_CONFIRM = False
-    if args.no_relax_cross_side:
-        RELAX_SAME_SIDE_ON_CROSS_CONFIRM = False
-    if args.strict_cross_entry:
-        USE_STRICT_CROSS_ENTRY = True
     if args.strict_volume_pct is not None:
         STRICT_MIN_VOLUME_PCT = args.strict_volume_pct
     if args.strict_delta_pct is not None:
@@ -3434,3 +2300,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
