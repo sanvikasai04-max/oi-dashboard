@@ -364,6 +364,19 @@ RELAX_SAME_SIDE_ON_CROSS_CONFIRM = True
 RELAXED_MIN_SAME_SIDE = 1
 RELAXED_MIN_OPP_SUPPORT = 2
 
+# Strict cross-strike entry mode. Disabled by default; enable with
+# --strict-cross-entry to test volume/delta/price confirmation rules.
+USE_STRICT_CROSS_ENTRY = False
+STRICT_MIN_VOLUME_PCT = 80
+STRICT_MIN_DELTA_PCT = 2
+STRICT_MIN_PRICE_PCT = 3
+STRICT_MIN_SAME_STRIKES = 3
+STRICT_MIN_OPP_STRIKES = 2
+STRICT_CONFIRM_WINDOW = 5
+STRICT_MIN_CONFIRM_BARS = 3
+STRICT_ALLOW_VOLUME_NEUTRAL = True
+STRICT_EXIT_CONFIRM_BARS = 2
+
 # Exit rule:
 # For CE/PE buy, exit when any 3 of Delta%, Gamma%, Volume%, Price% become negative.
 EXIT_NEG_COUNT = 3
@@ -1097,6 +1110,7 @@ def find_exit_after_entry(
     same_side_count=0,
     opp_side_count=0,
     snapshot_analysis=None,
+    strict_entry=False,
 ):
     cm = col_map[side]
     stop_loss_pts = adaptive_stop_loss_pts(
@@ -1120,6 +1134,8 @@ def find_exit_after_entry(
     weak_count = 0
     dynamic_weak_count = 0
     dynamic_strong_count = 0
+    strict_opp_first_score = None
+    strict_opp_confirm_count = 0
 
     for i, r in trade.iterrows():
         price = r[cm["price"]]
@@ -1149,6 +1165,28 @@ def find_exit_after_entry(
 
         protected_entry = momentum_entry or analysis_entry
         min_hold_bars = MOMENTUM_MIN_HOLD_BARS if protected_entry else MIN_HOLD_BARS
+
+        if strict_entry and i >= 1:
+            opp = opposite_side(side)
+            opp_ok, opp_score, _, _, opp_reason = strict_cross_snapshot(
+                full, r["timestamp"], strike, opp
+            )
+            if opp_ok:
+                strict_opp_confirm_count += 1
+                if strict_opp_first_score is None:
+                    strict_opp_first_score = opp_score
+                if (
+                    strict_opp_confirm_count >= STRICT_EXIT_CONFIRM_BARS and
+                    opp_score >= strict_opp_first_score
+                ):
+                    pnl = price - entry_price
+                    return r["timestamp"], price, pnl, (
+                        f"Exit: strict opposite confirm {opp_reason} "
+                        f"CNT={strict_opp_confirm_count}"
+                    )
+            else:
+                strict_opp_confirm_count = 0
+                strict_opp_first_score = None
 
         # Do not exit too early
         if i < min_hold_bars:
@@ -1396,6 +1434,87 @@ def same_side_entry_ok(side, same_side_count, opp_side_count, flow_reason):
         opp_side_count >= RELAXED_MIN_OPP_SUPPORT and
         has_cross_side_oi_confirm(side, flow_reason)
     )
+
+def strict_cross_snapshot(full, ts, strike, side):
+    nearby = full[
+        (full["timestamp"] == ts) &
+        (full["strike"] >= strike - STRIKES_NEARBY * STRIKE_STEP) &
+        (full["strike"] <= strike + STRIKES_NEARBY * STRIKE_STEP)
+    ].copy()
+
+    if nearby.empty:
+        return False, 0, 0, 0, "STRICT_NO_NEARBY"
+
+    if side == "ce":
+        own_prefix = "ce"
+        opp_prefix = "pe"
+        tag = "STRICT_BULL"
+    else:
+        own_prefix = "pe"
+        opp_prefix = "ce"
+        tag = "STRICT_BEAR"
+
+    own_delta = nearby[f"{own_prefix}_d_pct"] >= STRICT_MIN_DELTA_PCT
+    own_price = nearby[f"{own_prefix}_p_pct"] >= STRICT_MIN_PRICE_PCT
+    own_volume = nearby[f"{own_prefix}_v_pct"] >= STRICT_MIN_VOLUME_PCT
+    own_confirm = own_delta & own_price & own_volume
+
+    opp_delta_drop = nearby[f"{opp_prefix}_d_pct"] <= -STRICT_MIN_DELTA_PCT
+    opp_price_drop = nearby[f"{opp_prefix}_p_pct"] <= -STRICT_MIN_PRICE_PCT
+    opp_volume_sell = nearby[f"{opp_prefix}_v_pct"] >= STRICT_MIN_VOLUME_PCT
+    opp_volume_exit = nearby[f"{opp_prefix}_v_pct"] < 0
+    opp_confirm = opp_delta_drop & opp_price_drop & (opp_volume_sell | opp_volume_exit)
+
+    if STRICT_ALLOW_VOLUME_NEUTRAL:
+        partial_own = own_delta & own_price & (nearby[f"{own_prefix}_v_pct"] >= 0)
+        own_count = max(_count_true(own_confirm), _count_true(partial_own))
+    else:
+        own_count = _count_true(own_confirm)
+
+    opp_count = _count_true(opp_confirm)
+    high_volume_count = _count_true(nearby[f"{own_prefix}_v_pct"] >= 100)
+    super_volume_count = _count_true(nearby[f"{own_prefix}_v_pct"] >= 150)
+    mega_volume_count = _count_true(nearby[f"{own_prefix}_v_pct"] >= 200)
+
+    score = (
+        own_count * 4 +
+        opp_count * 4 +
+        high_volume_count +
+        super_volume_count * 2 +
+        mega_volume_count * 3
+    )
+    ok = own_count >= STRICT_MIN_SAME_STRIKES and opp_count >= STRICT_MIN_OPP_STRIKES
+    reason = (
+        f"{tag} OWN={own_count} OPP={opp_count} "
+        f"V100={high_volume_count} V150={super_volume_count} V200={mega_volume_count}"
+    )
+    return ok, score, own_count, opp_count, reason
+
+def strict_cross_entry_ok(full, ts, strike, side):
+    if not USE_STRICT_CROSS_ENTRY:
+        return False, 0, "STRICT_OFF"
+
+    timestamps = [x for x in sorted(full["timestamp"].unique()) if x <= ts]
+    recent = timestamps[-STRICT_CONFIRM_WINDOW:]
+    confirmations = []
+    for snap_ts in recent:
+        ok, score, own_count, opp_count, reason = strict_cross_snapshot(full, snap_ts, strike, side)
+        if ok:
+            confirmations.append((snap_ts, score, own_count, opp_count, reason))
+
+    if len(confirmations) < STRICT_MIN_CONFIRM_BARS:
+        return False, 0, f"STRICT_WAIT {len(confirmations)}/{STRICT_MIN_CONFIRM_BARS}"
+
+    first_score = confirmations[0][1]
+    last_score = confirmations[-1][1]
+    if last_score < first_score:
+        return False, last_score, f"STRICT_NOT_STRONGER {last_score}<{first_score}"
+
+    reason = confirmations[-1][4] + f" CONF={len(confirmations)}/{len(recent)} FIRST={first_score} LAST={last_score}"
+    return True, last_score, reason
+
+def opposite_side(side):
+    return "pe" if side == "ce" else "ce"
 # ══════════════════════════════════════════════════════════════════════════════
 # CORE FUNCTIONS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2606,6 +2725,9 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         price_ok = pp > 1
         volume_ok = vp > 30
         flow_ok = flow_score >= MIN_ENTRY_FLOW_SCORE
+        strict_entry_ok, strict_entry_score, strict_entry_reason = strict_cross_entry_ok(
+            full, ts, stk, side
+        )
         analysis_quality_ok = (
             analysis_ok and
             dp > 3 and
@@ -2637,7 +2759,13 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         if not same_side_ok:
             low_same_side_reject += 1
 
-        if (sum(strong_checks) >= 3 and same_side_ok) or analysis_quality_ok:
+        entry_allowed = (
+            strict_entry_ok
+            if USE_STRICT_CROSS_ENTRY
+            else ((sum(strong_checks) >= 3 and same_side_ok) or analysis_quality_ok)
+        )
+
+        if entry_allowed:
 
             if side == "pe":
                 pe_pass += 1
@@ -2650,6 +2778,8 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             )
             if analysis_ok:
                 entry_score += 75
+            if strict_entry_ok:
+                entry_score += 100 + strict_entry_score
 
             entry_price = pv  # option buy price at entry candle
 
@@ -2666,6 +2796,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
                 same_side_count=same_side_count,
                 opp_side_count=opp_side_count,
                 snapshot_analysis=snapshot_analysis,
+                strict_entry=strict_entry_ok,
             )
 
             entry_price = pv
@@ -2698,6 +2829,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             f"COMP={int(bool(r.get('ma_compression', False)))} "
             f"X={ema_crosses} "
             f"{'ANALYSIS_ENTRY ' + analysis_reason if analysis_ok else ''} "
+            f"{'STRICT_ENTRY ' + strict_entry_reason if strict_entry_ok else strict_entry_reason if USE_STRICT_CROSS_ENTRY else ''} "
             f"{momentum_reason if momentum_ok else ''} "
             f"{'EARLY_OI' if early_entry_ok else ''} {flow_reason}"
             ))
@@ -2834,6 +2966,16 @@ def run_single_analysis(csv_path=None, analysis_date=None):
           f"{dim('Low flow blocked:')} {bold(str(low_flow_reject))}   "
           f"{dim('Low same-side blocked:')} {bold(str(low_same_side_reject))}   "
           f"{dim('Late low-flow blocked:')} {bold(str(late_flow_reject))}")
+    if USE_STRICT_CROSS_ENTRY:
+        print(f"  {dim('Strict cross entry:')} {bold('ON')}   "
+              f"{dim('V% >=')} {bold(str(STRICT_MIN_VOLUME_PCT))}   "
+              f"{dim('D% >=')} {bold(str(STRICT_MIN_DELTA_PCT))}   "
+              f"{dim('P% >=')} {bold(str(STRICT_MIN_PRICE_PCT))}   "
+              f"{dim('Same/Opp >=')} {bold(str(STRICT_MIN_SAME_STRIKES) + '/' + str(STRICT_MIN_OPP_STRIKES))}   "
+              f"{dim('Confirm:')} {bold(str(STRICT_MIN_CONFIRM_BARS) + '/' + str(STRICT_CONFIRM_WINDOW))}   "
+              f"{dim('Exit bars:')} {bold(str(STRICT_EXIT_CONFIRM_BARS))}")
+    else:
+        print(f"  {dim('Strict cross entry:')} {bold('OFF')}")
     if USE_EARLY_OI_ENTRY:
         print(f"  {dim('Early OI entry:')} {bold('ON')}   "
               f"{dim('Window:')} {bold(EARLY_ENTRY_START.strftime('%H:%M') + '-' + ENTRY_START.strftime('%H:%M'))}   "
@@ -3062,6 +3204,26 @@ def parse_args():
                         help="Early entries can use strong same-side flow even without OI_BULL/OI_BEAR.")
     parser.add_argument("--no-relax-cross-side", action="store_true",
                         help="Disable relaxed same-side rule when OI_BULL/OI_BEAR has opposite-side support.")
+    parser.add_argument("--strict-cross-entry", action="store_true",
+                        help="Enable stricter entry/exit logic using repeated cross-strike volume/delta/price confirmation.")
+    parser.add_argument("--strict-volume-pct", type=float,
+                        help="Strict mode minimum own-side volume percentage. Default: 80.")
+    parser.add_argument("--strict-delta-pct", type=float,
+                        help="Strict mode minimum own-side delta percentage and opposite-side delta drop. Default: 2.")
+    parser.add_argument("--strict-price-pct", type=float,
+                        help="Strict mode minimum own-side price percentage and opposite-side price drop. Default: 3.")
+    parser.add_argument("--strict-same-strikes", type=int,
+                        help="Strict mode minimum confirming same-side nearby strikes. Default: 3.")
+    parser.add_argument("--strict-opp-strikes", type=int,
+                        help="Strict mode minimum confirming opposite-side nearby strikes. Default: 2.")
+    parser.add_argument("--strict-window", type=int,
+                        help="Strict mode recent snapshot window. Default: 5.")
+    parser.add_argument("--strict-confirm-bars", type=int,
+                        help="Strict mode minimum confirmations inside the window. Default: 3.")
+    parser.add_argument("--strict-exit-bars", type=int,
+                        help="Strict mode opposite-side confirmations needed to exit. Default: 2.")
+    parser.add_argument("--strict-require-volume", action="store_true",
+                        help="Strict mode requires volume threshold on own-side confirmations; otherwise delta+price with non-negative volume can count.")
     parser.add_argument("--console-xlsx", nargs="?", const=OUT_CONSOLE_XLSX,
                         help="Dump the exact colored console output to an Excel file. "
                              f"Default file: {OUT_CONSOLE_XLSX}.")
@@ -3078,6 +3240,10 @@ def apply_arg_config(args):
     global NIFTY_DATA_MODE, NIFTY_1MIN_PATH, _NIFTY_200MA_CACHE
     global OI_DATA_MODE
     global OI_PRINT_INTERVAL
+    global USE_STRICT_CROSS_ENTRY, STRICT_MIN_VOLUME_PCT, STRICT_MIN_DELTA_PCT
+    global STRICT_MIN_PRICE_PCT, STRICT_MIN_SAME_STRIKES, STRICT_MIN_OPP_STRIKES
+    global STRICT_CONFIRM_WINDOW, STRICT_MIN_CONFIRM_BARS, STRICT_ALLOW_VOLUME_NEUTRAL
+    global STRICT_EXIT_CONFIRM_BARS
 
     OI_DATA_MODE = args.oi_data
     OI_PRINT_INTERVAL = args.print_interval
@@ -3114,6 +3280,26 @@ def apply_arg_config(args):
         EARLY_REQUIRE_CROSS_CONFIRM = False
     if args.no_relax_cross_side:
         RELAX_SAME_SIDE_ON_CROSS_CONFIRM = False
+    if args.strict_cross_entry:
+        USE_STRICT_CROSS_ENTRY = True
+    if args.strict_volume_pct is not None:
+        STRICT_MIN_VOLUME_PCT = args.strict_volume_pct
+    if args.strict_delta_pct is not None:
+        STRICT_MIN_DELTA_PCT = args.strict_delta_pct
+    if args.strict_price_pct is not None:
+        STRICT_MIN_PRICE_PCT = args.strict_price_pct
+    if args.strict_same_strikes is not None:
+        STRICT_MIN_SAME_STRIKES = args.strict_same_strikes
+    if args.strict_opp_strikes is not None:
+        STRICT_MIN_OPP_STRIKES = args.strict_opp_strikes
+    if args.strict_window is not None:
+        STRICT_CONFIRM_WINDOW = args.strict_window
+    if args.strict_confirm_bars is not None:
+        STRICT_MIN_CONFIRM_BARS = args.strict_confirm_bars
+    if args.strict_exit_bars is not None:
+        STRICT_EXIT_CONFIRM_BARS = args.strict_exit_bars
+    if args.strict_require_volume:
+        STRICT_ALLOW_VOLUME_NEUTRAL = False
 
 def print_compact_monthly_summary(results, month, year, start_date, end_date):
     header(f"MONTHLY SUMMARY - {month_name(month)} {year}", 112)
