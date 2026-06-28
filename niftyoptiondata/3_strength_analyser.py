@@ -117,6 +117,7 @@ OI_DATA_MODE     = "back"          # "back" | "live"
 BACK_OI_DATA_DIR = Path(__file__).resolve().parent
 LIVE_OI_DATA_DIR = Path(__file__).resolve().parents[3] / "StrategyBuilder" / "Strategy3MAGreeks" / "live_Saidata_weeklyexp"
 OI_PRINT_INTERVAL = "1min"         # "5min" default; pass "1min" to print every candle
+SHOW_OI_TABLE     = False          # use --show-oi-table for full snapshot OI debug output
 CROSS_CANDLES    = 5               # lookback window for cross-candle trend
 STRIKES_NEARBY   = 2
 ATM_RANGE_POINTS  = 500
@@ -1844,7 +1845,6 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         }
 
     full       = pd.concat(records, ignore_index=True).sort_values(["timestamp","strike"])
-    snapshot_analysis = build_snapshot_analysis(full)
     timestamps = sorted(full["timestamp"].unique())
 
     W  = 177   # console width - wide enough for all columns plus compact snapshot analysis
@@ -1853,36 +1853,19 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     # 
     # LAYER 1  SAME-CANDLE SPIKE REPORT
     # 
-    header(f"SNAPSHOT OI BUILDUP  every {OI_PRINT_INTERVAL}, CE first then PE", W)
-    print(f"  {dim('Layer 1 threshold: runtime percentile ')} {bold(str(STRENGTH_PCT))}th\n")
-
-    print(
-        f"  {dim('Also showing price-volume buildup rows: P% >=')} "
-        f"{bold(str(OI_TABLE_PRICE_PCT))}   {dim('V% >=')} "
-        f"{bold(str(OI_TABLE_VOLUME_PCT))}   "
-        f"{dim('and weakness rows: P% <=')} {bold(str(OI_TABLE_PRICE_DROP_PCT))}\n"
-    )
-
-    h1 = (f"  {'TIMESTAMP':<19}  {'STRIKE':>8}  {'SPOT':>8}  {'SIDE':>4}  "
-          f"{'SCORE':>5}  {'STRENGTH':>8}  {'LTP':>8}  "
-          f"{'DELTA':>10} {'D CHG%':>9}  {'GAMMA':>10} {'G CHG%':>9}  "
-          f"{'VOLUME':>10} {'V%':>9}  {'PRICE':>8} {'P%':>9}  {'IV':>7}  {'ANALYSIS':<24}")
-    print(bold(h1))
-    sep(W)
-    
-    
     snapshot_rows = []
     layer1_rows = []
-    display_full = full[full["timestamp"].map(is_print_interval_timestamp)].copy()
+    display_full = full[full["timestamp"].map(is_print_interval_timestamp)].copy() if SHOW_OI_TABLE else None
     for side in sides:
-        for _, r in display_full.iterrows():
-            snapshot_rows.append((r["timestamp"], r["strike"], r["spot"], side,
-                                  r[f"{side}_score"],
-                                  r[col_map[side]["delta"]], r[f"{side}_d_pct"],
-                                  r[col_map[side]["gamma"]], r[f"{side}_g_pct"],
-                                  r[col_map[side]["volume"]],r[f"{side}_v_pct"],
-                                  r[col_map[side]["price"]], r[f"{side}_p_pct"],
-                                  r[col_map[side]["iv"]]))
+        if SHOW_OI_TABLE:
+            for _, r in display_full.iterrows():
+                snapshot_rows.append((r["timestamp"], r["strike"], r["spot"], side,
+                                      r[f"{side}_score"],
+                                      r[col_map[side]["delta"]], r[f"{side}_d_pct"],
+                                      r[col_map[side]["gamma"]], r[f"{side}_g_pct"],
+                                      r[col_map[side]["volume"]],r[f"{side}_v_pct"],
+                                      r[col_map[side]["price"]], r[f"{side}_p_pct"],
+                                      r[col_map[side]["iv"]]))
 
         sub = full[
             full[f"{side}_same_spike"] |
@@ -1899,41 +1882,59 @@ def run_single_analysis(csv_path=None, analysis_date=None):
                                 r[col_map[side]["iv"]]))
 
     # Same timestamp  all CE first  all PE next
-    snapshot_rows.sort(key=lambda x: (x[0], 0 if x[3] == "ce" else 1, x[1]))
+    if SHOW_OI_TABLE:
+        snapshot_rows.sort(key=lambda x: (x[0], 0 if x[3] == "ce" else 1, x[1]))
     layer1_rows.sort(key=lambda x: (x[0], 0 if x[3] == "ce" else 1, x[1]))
     entry_source_rows = layer1_rows
     entry_source_rows.sort(key=lambda x: (x[0], 0 if x[3] == "ce" else 1, x[1]))
 
-    prev_snapshot_ts = None
-    snapshot_line_no = 0
-    for ts, stk, spot, side, score, dv, dp, gv, gp, vv, vp, pv, pp, iv in snapshot_rows:
-        is_first_snapshot_row = ts != prev_snapshot_ts
-        if prev_snapshot_ts is not None and ts != prev_snapshot_ts:
-            print()
-            snapshot_line_no = 0
-        prev_snapshot_ts = ts
-        snapshot_line_no += 1
-        analysis_txt = snapshot_analysis_column(ts, snapshot_analysis, snapshot_line_no)
-
-        sc     = f"{score:5.1f}"
-        lbl    = strength_label(score)
-        side_c = bright_green("CE") if side == "ce" else bright_red("PE")
-        dv_d   = dv
-        gv_d   = gv
+    if SHOW_OI_TABLE:
+        snapshot_analysis = build_snapshot_analysis(full)
+        header(f"SNAPSHOT OI BUILDUP  every {OI_PRINT_INTERVAL}, CE first then PE", W)
+        print(f"  {dim('Layer 1 threshold: runtime percentile ')} {bold(str(STRENGTH_PCT))}th\n")
         print(
-            f"  {dim(str(ts)[:19])}  "
-            f"{cyan(f'{stk:>8.1f}')}  {cyan(f'{spot:>8.2f}')}  {side_c}  "
-            f"{bold(sc)}  {lbl}  {dim(f'{pv:>8.2f}')}  "
-            f"{rjust(dim(f'{dv_d:>10.4f}'), 10)} {rjust(color_pct(dp), 9)}  "
-            f"{rjust(dim(f'{gv_d:>10.6f}'), 10)} {rjust(color_pct(gp), 9)}  "
-            f"{rjust(dim(f'{vv:>10,.0f}'), 10)} {rjust(color_pct(vp, 50), 9)}  "
-            f"{dim(f'{pv:>8.2f}')} {rjust(color_pct(pp), 9)}  "
-            f"{dim(f'{iv:>7.2f}%')}  {analysis_txt:<24}"
+            f"  {dim('Also showing price-volume buildup rows: P% >=')} "
+            f"{bold(str(OI_TABLE_PRICE_PCT))}   {dim('V% >=')} "
+            f"{bold(str(OI_TABLE_VOLUME_PCT))}   "
+            f"{dim('and weakness rows: P% <=')} {bold(str(OI_TABLE_PRICE_DROP_PCT))}\n"
         )
 
-    if not snapshot_rows:
-        print(f"  {dim('No snapshot rows found.')}")
-    sep(W)
+        h1 = (f"  {'TIMESTAMP':<19}  {'STRIKE':>8}  {'SPOT':>8}  {'SIDE':>4}  "
+              f"{'SCORE':>5}  {'STRENGTH':>8}  {'LTP':>8}  "
+              f"{'DELTA':>10} {'D CHG%':>9}  {'GAMMA':>10} {'G CHG%':>9}  "
+              f"{'VOLUME':>10} {'V%':>9}  {'PRICE':>8} {'P%':>9}  {'IV':>7}  {'ANALYSIS':<24}")
+        print(bold(h1))
+        sep(W)
+
+        prev_snapshot_ts = None
+        snapshot_line_no = 0
+        for ts, stk, spot, side, score, dv, dp, gv, gp, vv, vp, pv, pp, iv in snapshot_rows:
+            if prev_snapshot_ts is not None and ts != prev_snapshot_ts:
+                print()
+                snapshot_line_no = 0
+            prev_snapshot_ts = ts
+            snapshot_line_no += 1
+            analysis_txt = snapshot_analysis_column(ts, snapshot_analysis, snapshot_line_no)
+
+            sc     = f"{score:5.1f}"
+            lbl    = strength_label(score)
+            side_c = bright_green("CE") if side == "ce" else bright_red("PE")
+            dv_d   = dv
+            gv_d   = gv
+            print(
+                f"  {dim(str(ts)[:19])}  "
+                f"{cyan(f'{stk:>8.1f}')}  {cyan(f'{spot:>8.2f}')}  {side_c}  "
+                f"{bold(sc)}  {lbl}  {dim(f'{pv:>8.2f}')}  "
+                f"{rjust(dim(f'{dv_d:>10.4f}'), 10)} {rjust(color_pct(dp), 9)}  "
+                f"{rjust(dim(f'{gv_d:>10.6f}'), 10)} {rjust(color_pct(gp), 9)}  "
+                f"{rjust(dim(f'{vv:>10,.0f}'), 10)} {rjust(color_pct(vp, 50), 9)}  "
+                f"{dim(f'{pv:>8.2f}')} {rjust(color_pct(pp), 9)}  "
+                f"{dim(f'{iv:>7.2f}%')}  {analysis_txt:<24}"
+            )
+
+        if not snapshot_rows:
+            print(f"  {dim('No snapshot rows found.')}")
+        sep(W)
 
     # TOP ENTRIES TABLE  best entry candles from Layer 1 data
     # Logic: delta up + gamma up + volume up + price up
@@ -2269,8 +2270,9 @@ def run_single_analysis(csv_path=None, analysis_date=None):
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "Options flow strength analyser. No args keeps hardcoded CSV/date "
-            "full-output mode. --monthly enables compact date-by-date summary mode."
+            "Options flow strength analyser. Default output focuses on entry/exit rows; "
+            "--show-oi-table enables the full snapshot OI debug table. "
+            "--monthly enables compact date-by-date summary mode."
         )
     )
     parser.add_argument("--csv", "--csv-path", dest="csv_path",
@@ -2288,7 +2290,9 @@ def parse_args():
     parser.add_argument("--csv-dir",
                         help="Folder containing weekly oi_YYYY_MM_DD.csv files. Overrides --oi-data for monthly mode.")
     parser.add_argument("--print-interval", "--oi-print-interval", type=parse_print_interval_arg, default=OI_PRINT_INTERVAL,
-                        help="Snapshot OI buildup print interval: 5min default, or 1min to print every candle.")
+                        help="Snapshot OI buildup print interval when --show-oi-table is used: 5min, or 1min to print every candle.")
+    parser.add_argument("--show-oi-table", action="store_true", default=SHOW_OI_TABLE,
+                        help="Print the full snapshot OI buildup table before the entry/exit table. Hidden by default for faster runs.")
     parser.add_argument("--no-next-week", action="store_true",
                         help="Monthly mode: do not include first 7 days of next month.")
     parser.add_argument("--strict-volume-pct", type=float,
@@ -2359,6 +2363,7 @@ def parse_args():
 def apply_arg_config(args):
     global OI_DATA_MODE
     global OI_PRINT_INTERVAL
+    global SHOW_OI_TABLE
     global STRICT_MIN_VOLUME_PCT, STRICT_MIN_DELTA_PCT
     global STRICT_MIN_PRICE_PCT, STRICT_MIN_SAME_STRIKES, STRICT_MIN_OPP_STRIKES
     global STRICT_CONFIRM_WINDOW, STRICT_MIN_CONFIRM_BARS, STRICT_ALLOW_VOLUME_NEUTRAL
@@ -2369,6 +2374,7 @@ def apply_arg_config(args):
 
     OI_DATA_MODE = args.oi_data
     OI_PRINT_INTERVAL = args.print_interval
+    SHOW_OI_TABLE = args.show_oi_table
 
     if args.strict_volume_pct is not None:
         STRICT_MIN_VOLUME_PCT = args.strict_volume_pct
