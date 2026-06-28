@@ -176,9 +176,11 @@ STRICT_SPIKE_OVERRIDE_SCORE = 60
 # is blocked because it is delta/price noise without real volume or cross-side
 # confirmation. Values derived from Jun-27 bad-entry analysis:
 #   V80  >= 4  blocks every bad entry (13:00 had V80=0, 14:25 had V80=1, etc.)
+#   V150 >= 4  requires real expiry-day volume expansion, not just broad mild volume
 #   P5   >= 3  price >= 5% must appear on 3+ nearby strikes
 #   OppP5 >= 3 opposite side must also show >=5% drop on 3+ strikes
 STRICT_SPIKE_MIN_V80   = 4   # volume >= 80% on at least this many nearby strikes
+STRICT_SPIKE_MIN_V150  = 4   # volume >= 150% on at least this many nearby strikes
 STRICT_SPIKE_MIN_P5    = 3   # own price >= 5% on at least this many nearby strikes
 STRICT_SPIKE_MIN_OPP_P5 = 3  # opposite price <= -5% on at least this many nearby strikes
 # Depth guard (Jun-03 fix): move must not already be exhausted at entry.
@@ -747,7 +749,7 @@ def strict_cross_snapshot(full, ts, strike, side):
         f"OppD2={opp_d2} OppD4={opp_d4} OppP3={opp_p3} OppP5={opp_p5}"
     )
     # Extra quality metrics returned for spike-override quality checks
-    extras = {"v80": v80, "p5": p5, "opp_p5": opp_p5, "d4": d4, "p6": p6}
+    extras = {"v80": v80, "v150": v150, "p5": p5, "opp_p5": opp_p5, "d4": d4, "p6": p6}
     return ok, score, own_count, opp_count, reason, extras
 
 def strict_candidate_strikes(full, ts, strike):
@@ -855,6 +857,7 @@ def strict_cross_entry_ok(full, ts, strike, side):
         # Guard set (accumulative — each one derived from a real bad-entry day):
         #   [Jun-27 guards]
         #   V80 >= 4    – volume confirming on 4+ nearby strikes (not delta noise)
+        #   V150 >= 4   – stronger expiry-day volume expansion, blocks weaker first spikes
         #   P5  >= 3    – price >= 5% on 3+ nearby strikes (genuine momentum)
         #   OppP5 >= 3  – opposite price <= -5% on 3+ strikes (cross-side confirm)
         #   [Jun-03 guards]
@@ -870,6 +873,10 @@ def strict_cross_entry_ok(full, ts, strike, side):
                 v80_ok = ex.get("v80", 0) >= STRICT_SPIKE_MIN_V80
                 if not v80_ok:
                     blocked_by.append(f"V80={ex.get('v80',0)}<{STRICT_SPIKE_MIN_V80}")
+
+                v150_ok = ex.get("v150", 0) >= STRICT_SPIKE_MIN_V150
+                if not v150_ok:
+                    blocked_by.append(f"V150={ex.get('v150',0)}<{STRICT_SPIKE_MIN_V150}")
 
                 # Guard B: own price depth surface
                 p5_ok = ex.get("p5", 0) >= STRICT_SPIKE_MIN_P5
@@ -905,6 +912,7 @@ def strict_cross_entry_ok(full, ts, strike, side):
                         f" SPIKE_OVERRIDE score={last_snap['score']}>={STRICT_SPIKE_OVERRIDE_SCORE} "
                         f"CONF={len(confirmations)}/{len(recent)} "
                         f"V80={ex.get('v80',0)}>={STRICT_SPIKE_MIN_V80} "
+                        f"V150={ex.get('v150',0)}>={STRICT_SPIKE_MIN_V150} "
                         f"P5={ex.get('p5',0)}>={STRICT_SPIKE_MIN_P5} "
                         f"OppP5={ex.get('opp_p5',0)}>={STRICT_SPIKE_MIN_OPP_P5} "
                         f"D4={d4_val} P6={p6_val}"
@@ -2312,6 +2320,10 @@ def parse_args():
                         help="Spike override quality guard: own-side V80 count must be >= this. "
                              "Default: 4. Blocks low-volume delta noise from triggering overrides. "
                              "Use 0 to disable this guard.")
+    parser.add_argument("--spike-min-v150", type=int, default=None,
+                        help="Spike override quality guard: own-side V150 count (volume >= 150%%) must be >= this. "
+                             "Default: 4. Blocks broad but mild first-spike entries on expiry day. "
+                             "Use 0 to disable this guard.")
     parser.add_argument("--spike-min-p5", type=int, default=None,
                         help="Spike override quality guard: own-side P5 count (price >= 5%%) must be >= this. "
                              "Default: 3. Ensures price momentum is genuine across strikes. "
@@ -2352,7 +2364,7 @@ def apply_arg_config(args):
     global STRICT_CONFIRM_WINDOW, STRICT_MIN_CONFIRM_BARS, STRICT_ALLOW_VOLUME_NEUTRAL
     global STRICT_EXIT_CONFIRM_BARS, STRICT_EXIT_SURGE_RATIO, STRICT_SPIKE_OVERRIDE_SCORE
     global ALLOW_SIDE_SWITCH
-    global STRICT_SPIKE_MIN_V80, STRICT_SPIKE_MIN_P5, STRICT_SPIKE_MIN_OPP_P5
+    global STRICT_SPIKE_MIN_V80, STRICT_SPIKE_MIN_V150, STRICT_SPIKE_MIN_P5, STRICT_SPIKE_MIN_OPP_P5
     global STRICT_SPIKE_MIN_D4, STRICT_SPIKE_MIN_P6, STRICT_SPIKE_OVERRIDE_MIN_TIME
 
     OI_DATA_MODE = args.oi_data
@@ -2380,6 +2392,8 @@ def apply_arg_config(args):
         STRICT_SPIKE_OVERRIDE_SCORE = args.spike_override_score
     if hasattr(args, "spike_min_v80") and args.spike_min_v80 is not None:
         STRICT_SPIKE_MIN_V80 = args.spike_min_v80
+    if hasattr(args, "spike_min_v150") and args.spike_min_v150 is not None:
+        STRICT_SPIKE_MIN_V150 = args.spike_min_v150
     if hasattr(args, "spike_min_p5") and args.spike_min_p5 is not None:
         STRICT_SPIKE_MIN_P5 = args.spike_min_p5
     if hasattr(args, "spike_min_opp_p5") and args.spike_min_opp_p5 is not None:
