@@ -199,6 +199,15 @@ STRICT_SPIKE_MIN_OPP_P3 = 4  # or broad opposite price <= -3% weakness across th
 # EITHER condition is sufficient — only block if BOTH are missing.
 STRICT_SPIKE_MIN_D4    = 3   # delta >= 4% on at least this many strikes (OR P6 check)
 STRICT_SPIKE_MIN_P6    = 2   # price >= 6% on at least this many strikes (OR D4 check)
+# Third entry path: extreme delta+price first, volume confirmation next.
+# This catches two-candle ignition patterns where price/delta move first and
+# volume confirms 1-2 minutes later after same-candle price momentum cools.
+STRICT_THIRD_ENTRY_EXTREME_D_PCT = 10.0
+STRICT_THIRD_ENTRY_EXTREME_P_PCT = 10.0
+STRICT_THIRD_ENTRY_MIN_EXTREME_COUNT = 3
+STRICT_THIRD_ENTRY_MIN_NEXT_V150 = 4
+STRICT_THIRD_ENTRY_MIN_NEXT_D4 = 3
+STRICT_THIRD_ENTRY_MIN_NEXT_OWN = 3
 # Session open guard (Jun-03 fix): no spike overrides in first N minutes.
 # At session open there are no prior candles to validate the move — all "CONF=1"
 # entries at open are inherently blind. 09:32 example: V80=0 but D5=5 — looked
@@ -1158,6 +1167,46 @@ def spike_override_pending_from_snapshot(full, ts, stk, side, vp):
     if vp >= STRICT_MIN_VOLUME_PCT:
         return False
     return True
+
+def third_entry_pending_snapshot(full, ts, stk, side, vp):
+    """
+    Third entry path setup:
+    first snapshot has extreme delta + price across nearby strikes while
+    volume is still normal. The next 1-2 snapshots may confirm with volume.
+    """
+    if STRICT_SPIKE_OVERRIDE_SCORE <= 0:
+        return None
+
+    ok, score, own_count, opp_count, strength_units, snap_strike, reason, ex = strict_best_snapshot(
+        full, ts, stk, side
+    )
+    extreme_count = spike_extreme_dual_count(
+        full,
+        ts,
+        stk,
+        side,
+        delta_min=STRICT_THIRD_ENTRY_EXTREME_D_PCT,
+        price_min=STRICT_THIRD_ENTRY_EXTREME_P_PCT,
+    )
+    if extreme_count < STRICT_THIRD_ENTRY_MIN_EXTREME_COUNT:
+        return None
+    if ex.get("p5", 0) < STRICT_SPIKE_MIN_P5:
+        return None
+    if ex.get("opp_p3", 0) < STRICT_SPIKE_MIN_OPP_P3 and ex.get("opp_p5", 0) < STRICT_SPIKE_MIN_OPP_P5:
+        return None
+    if vp >= STRICT_MIN_VOLUME_PCT:
+        return None
+
+    return {
+        "score": score,
+        "strike": snap_strike,
+        "reason": reason,
+        "extras": ex,
+        "extreme_count": extreme_count,
+        "own": own_count,
+        "opp": opp_count,
+        "units": strength_units,
+    }
 
 def spike_extreme_dual_count(full, ts, strike, side, delta_min=10.0, price_min=10.0):
     """
@@ -2186,6 +2235,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     pe_pass = 0
     top_rows = []
     pending_spike = None
+    third_pending_spikes = {}
 
     for row in entry_source_rows:
         ts, stk, spot, side, score, dv, dp, gv, gp, vv, vp, pv, pp, iv = row
@@ -2209,7 +2259,48 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         entry_reason_use = strict_entry_reason
         pending_used = False
 
+        third_key = (side, float(stk))
+        third_saved = third_pending_spikes.get(third_key)
+        if third_saved is not None and not entry_allowed:
+            third_age = (ts - third_saved["ts"]).total_seconds() / 60.0
+            if 1 <= third_age <= 2:
+                pending_snap = strict_best_snapshot(full, ts, stk, side)
+                pending_ok, pending_score, pending_own, _, _, _, pending_reason, pending_ex = pending_snap
+                setup = third_saved.get("setup", {})
+                pending_v80_ok = pending_ex.get("v80", 0) >= STRICT_SPIKE_MIN_V80
+                pending_v150_ok = pending_ex.get("v150", 0) >= STRICT_THIRD_ENTRY_MIN_NEXT_V150
+                pending_d4_val = pending_ex.get("d4", 0)
+                pending_own_ok = pending_own >= STRICT_THIRD_ENTRY_MIN_NEXT_OWN
+                pending_d4_ok = pending_d4_val >= STRICT_THIRD_ENTRY_MIN_NEXT_D4
+                if pending_v80_ok and pending_v150_ok and pending_own_ok and pending_d4_ok:
+                    setup_ex = setup.get("extras", {})
+                    entry_allowed = True
+                    entry_ts_use = ts
+                    entry_reason_use = (
+                        pending_reason +
+                        f" THIRD_ENTRY from={str(third_saved['ts'])[:19]} "
+                        f"to={str(ts)[:19]} "
+                        f"SETUP_SCORE={setup.get('score', 0)} "
+                        f"EXTREME={setup.get('extreme_count', 0)}>={STRICT_THIRD_ENTRY_MIN_EXTREME_COUNT} "
+                        f"SETUP_P5={setup_ex.get('p5',0)} "
+                        f"SETUP_OPP_P3={setup_ex.get('opp_p3',0)} "
+                        f"SETUP_OPP_P5={setup_ex.get('opp_p5',0)} "
+                        f"NEXT_V80={pending_ex.get('v80',0)}>={STRICT_SPIKE_MIN_V80} "
+                        f"NEXT_V150={pending_ex.get('v150',0)}>={STRICT_THIRD_ENTRY_MIN_NEXT_V150} "
+                        f"NEXT_D4={pending_d4_val}>={STRICT_THIRD_ENTRY_MIN_NEXT_D4} "
+                        f"NEXT_OWN={pending_own}>={STRICT_THIRD_ENTRY_MIN_NEXT_OWN}"
+                    )
+                    strict_entry_score = max(pending_score, setup.get("score", 0))
+                    pending_used = True
+                    r = full[
+                        (full["timestamp"] == ts) & (full["strike"] == stk)
+                    ].iloc[0]
+                    third_pending_spikes.pop(third_key, None)
+            elif third_age > 2:
+                third_pending_spikes.pop(third_key, None)
+
         raw_spike_pending = spike_override_pending_from_snapshot(full, ts, stk, side, vp)
+        third_pending = third_entry_pending_snapshot(full, ts, stk, side, vp)
         dual_extreme_count = spike_extreme_dual_count(full, ts, stk, side, delta_min=10.0, price_min=10.0)
         dual_extreme_pending = dual_extreme_count >= 3
         if dual_extreme_pending and not entry_allowed:
@@ -2225,6 +2316,13 @@ def run_single_analysis(csv_path=None, analysis_date=None):
                 "strike": stk,
                 "side": side,
                 "reason": f"SPIKE_PENDING_ROW score={score}",
+            }
+        if third_pending is not None and not entry_allowed:
+            third_pending_spikes[third_key] = {
+                "ts": ts,
+                "strike": stk,
+                "side": side,
+                "setup": third_pending,
             }
 
         if pending_spike is not None:
