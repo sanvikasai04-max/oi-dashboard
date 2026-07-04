@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OI Spike Dashboard — 2026-06-01</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg: #080a0f;
+  --panel: #0f1117;
+  --panel2: #13161e;
+  --border: #1c2030;
+  --border2: #252b3b;
+  --text: #dde3f0;
+  --muted: #4a5568;
+  --muted2: #64748b;
+  --ce: #38bdf8;
+  --pe: #f472b6;
+  --spike: #34d399;
+  --drop: #f87171;
+  --opp: #fbbf24;
+  --accent: #7c3aed;
+  --accent2: #6d28d9;
+  --pill: #1e2535;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',Consolas,'Courier New',monospace;font-size:12px;display:flex;flex-direction:column}
+
+/* ── HEADER ── */
+.hdr{
+  background:var(--panel);border-bottom:1px solid var(--border);
+  padding:10px 20px;display:flex;align-items:center;gap:20px;flex-shrink:0;
+}
+.hdr-title{font-size:15px;font-weight:800;letter-spacing:3px;color:var(--ce)}
+.hdr-date{color:var(--muted2);font-size:11px;letter-spacing:1px}
+.hdr-spot{margin-left:auto;text-align:right}
+.hdr-spot .val{font-size:18px;font-weight:700;color:var(--opp);letter-spacing:1px}
+.hdr-spot .lbl{font-size:10px;color:var(--muted);letter-spacing:2px}
+.hdr-range{font-size:11px;color:var(--muted2);margin-top:1px}
+
+/* ── TOOLBAR ── */
+.toolbar{
+  background:var(--panel);border-bottom:1px solid var(--border);
+  padding:8px 20px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0;
+}
+.tab-btn{
+  padding:5px 14px;border-radius:4px;border:1px solid var(--border2);
+  background:transparent;color:var(--muted2);font-size:11px;font-weight:700;
+  font-family:inherit;cursor:pointer;letter-spacing:1px;transition:all .15s;
+}
+.tab-btn:hover{color:var(--text);border-color:var(--muted2)}
+.tab-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+.sep{width:1px;height:20px;background:var(--border2);margin:0 4px}
+
+.metric-btn{
+  padding:4px 12px;border-radius:4px;border:1px solid var(--border2);
+  background:transparent;color:var(--muted2);font-size:11px;font-weight:700;
+  font-family:inherit;cursor:pointer;letter-spacing:1px;transition:all .15s;
+}
+.metric-btn:hover{color:var(--text)}
+.metric-btn.active.D{background:rgba(56,189,248,.2);color:var(--ce);border-color:var(--ce)}
+.metric-btn.active.G{background:rgba(52,211,153,.2);color:var(--spike);border-color:var(--spike)}
+.metric-btn.active.P{background:rgba(251,191,36,.2);color:var(--opp);border-color:var(--opp)}
+.metric-btn.active.V{background:rgba(244,114,182,.2);color:var(--pe);border-color:var(--pe)}
+
+.res-btn{
+  padding:4px 10px;border-radius:4px;border:1px solid var(--border2);
+  background:transparent;color:var(--muted2);font-size:11px;font-weight:700;
+  font-family:inherit;cursor:pointer;letter-spacing:1px;transition:all .15s;margin-left:auto;
+}
+.res-btn:hover{color:var(--text)}
+.res-btn.active{background:var(--panel2);color:var(--text);border-color:var(--border2)}
+
+.kbd-hint{font-size:10px;color:var(--muted);letter-spacing:.5px;margin-left:4px}
+
+/* ── MAIN LAYOUT ── */
+.main{display:flex;flex:1;overflow:hidden;gap:0}
+
+/* ── LEFT SIDEBAR ── */
+.sidebar{
+  width:260px;flex-shrink:0;background:var(--panel);
+  border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;
+}
+.sb-section{border-bottom:1px solid var(--border);flex-shrink:0}
+.sb-head{
+  padding:8px 12px;font-size:10px;font-weight:700;
+  color:var(--muted2);letter-spacing:2px;text-transform:uppercase;
+  background:var(--panel2);display:flex;justify-content:space-between;align-items:center;
+}
+.sb-stat{padding:8px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)}
+.sb-stat .lbl{font-size:10px;color:var(--muted2)}
+.sb-stat .v{font-size:13px;font-weight:700}
+.sb-filter{padding:6px 8px;display:flex;flex-direction:column;gap:4px}
+.flt-row{display:flex;gap:4px;flex-wrap:wrap}
+.flt-btn{
+  padding:3px 9px;border-radius:3px;border:1px solid var(--border2);
+  background:transparent;color:var(--muted2);font-size:10px;font-weight:700;
+  font-family:inherit;cursor:pointer;letter-spacing:.5px;transition:all .12s;
+}
+.flt-btn:hover{color:var(--text);border-color:var(--muted)}
+.flt-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.flt-btn.ce.active{background:rgba(56,189,248,.2);color:var(--ce);border-color:var(--ce)}
+.flt-btn.pe.active{background:rgba(244,114,182,.2);color:var(--pe);border-color:var(--pe)}
+.flt-btn.spk.active{background:rgba(52,211,153,.2);color:var(--spike);border-color:var(--spike)}
+.flt-btn.drp.active{background:rgba(248,113,113,.2);color:var(--drop);border-color:var(--drop)}
+.flt-btn.bull.active{background:rgba(52,211,153,.15);color:var(--spike);border-color:var(--spike)}
+.flt-btn.bear.active{background:rgba(248,113,113,.15);color:var(--drop);border-color:var(--drop)}
+
+.sb-search{
+  width:100%;background:var(--bg);border:1px solid var(--border2);
+  border-radius:3px;color:var(--text);font-family:inherit;
+  font-size:11px;padding:5px 8px;margin-top:4px;outline:none;
+}
+.sb-search:focus{border-color:var(--accent)}
+.sb-table-wrap{flex:1;overflow-y:auto}
+.sb-table-wrap::-webkit-scrollbar{width:4px}
+.sb-table-wrap::-webkit-scrollbar-track{background:var(--panel)}
+.sb-table-wrap::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+
+.event-row{
+  display:grid;grid-template-columns:38px 54px 28px 1fr 52px;
+  gap:0;padding:5px 10px;border-bottom:1px solid var(--border);
+  cursor:pointer;transition:background .1s;align-items:center;
+}
+.event-row:hover{background:rgba(124,58,237,.1)}
+.event-row.selected{background:rgba(124,58,237,.18)}
+.event-row .e-ts{font-size:10px;color:var(--muted2)}
+.event-row .e-stk{font-size:11px;font-weight:700;color:var(--text)}
+.event-row .e-side{font-size:9px;font-weight:700;padding:1px 4px;border-radius:2px}
+.e-side.CE{background:rgba(56,189,248,.15);color:var(--ce)}
+.e-side.PE{background:rgba(244,114,182,.15);color:var(--pe)}
+.event-row .e-metric{font-size:10px;color:var(--muted2)}
+.event-row .e-val{font-size:11px;font-weight:700;text-align:right}
+.e-val.pos{color:var(--spike)}
+.e-val.neg{color:var(--drop)}
+
+.opp-row-sb{
+  display:grid;grid-template-columns:38px 54px 1fr 50px 50px;
+  gap:0;padding:5px 10px;border-bottom:1px solid var(--border);
+  cursor:pointer;transition:background .1s;align-items:center;
+}
+.opp-row-sb:hover{background:rgba(251,191,36,.07)}
+.opp-row-sb .e-ts{font-size:10px;color:var(--muted2)}
+.opp-row-sb .e-stk{font-size:11px;font-weight:700}
+.opp-row-sb .e-metric{font-size:10px;color:var(--muted2)}
+.opp-row-sb .e-ce{font-size:11px;font-weight:700;text-align:right}
+.opp-row-sb .e-pe{font-size:11px;font-weight:700;text-align:right}
+
+.count-lbl{font-size:10px;color:var(--muted2);padding:4px 10px}
+
+/* ── CHARTS AREA ── */
+.charts-area{flex:1;display:flex;flex-direction:column;overflow:hidden;padding:12px;gap:10px}
+.charts-area.hidden{display:none}
+.chart-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;flex:1;min-height:0}
+.chart-box{
+  background:var(--panel);border:1px solid var(--border);
+  border-radius:5px;padding:10px 14px;display:flex;flex-direction:column;min-height:0;
+}
+.chart-box.full{grid-column:1/-1}
+.ch-title{font-size:10px;font-weight:700;letter-spacing:1.5px;color:var(--muted2);
+  text-transform:uppercase;margin-bottom:6px;flex-shrink:0;display:flex;justify-content:space-between}
+.ch-title .ch-thr{font-size:9px;color:var(--muted);letter-spacing:0}
+canvas{flex:1;min-height:0}
+
+/* ── SHORTCUTS PAGE ── */
+.shortcuts-area{flex:1;overflow-y:auto;padding:20px 24px}
+.shortcuts-area.hidden{display:none}
+.sc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.sc-card{background:var(--panel);border:1px solid var(--border);border-radius:5px;padding:14px}
+.sc-card h3{font-size:11px;color:var(--opp);letter-spacing:1.5px;margin-bottom:10px;font-weight:800}
+.sc-card p{font-size:11px;color:var(--muted2);line-height:1.9}
+.sc-card .cmd{
+  display:block;background:var(--bg);border:1px solid var(--border);
+  border-left:3px solid var(--accent);padding:5px 9px;
+  margin:5px 0;border-radius:3px;color:var(--ce);font-size:11px;
+}
+.k{display:inline-block;background:var(--border2);border:1px solid var(--border2);
+  border-radius:3px;padding:1px 5px;font-size:10px;color:var(--opp)}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:var(--panel)}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="hdr">
+  <div>
+    <div class="hdr-title">⚡ OI SPIKE DASHBOARD</div>
+    <div class="hdr-date">NIFTY OPTIONS · 2026-06-01 · 1-MIN CANDLES</div>
+  </div>
+  <div style="display:flex;gap:20px;align-items:center">
+    <div style="font-size:11px;color:var(--muted2);line-height:1.8">
+      <div>Strikes: <span style="color:var(--text)">23200, 23250, 23300, 23350, 23400, 23450, 23500, 23550, 23600, 23650, 23700, 23750</span></div>
+      <div>Rows: <span style="color:var(--text)">855</span></div>
+    </div>
+    <div class="hdr-spot">
+      <div class="val" id="spotDisp">—</div>
+      <div class="lbl">SPOT</div>
+      <div class="hdr-range" id="rangeDisp">—</div>
+    </div>
+  </div>
+</div>
+
+<!-- TOOLBAR -->
+<div class="toolbar">
+  <button class="tab-btn active" onclick="showPage('charts')" id="tb-charts">📈 CHARTS</button>
+  <button class="tab-btn" onclick="showPage('shortcuts')" id="tb-shortcuts">⌨ SHORTCUTS</button>
+
+  <div class="sep"></div>
+
+  <button class="metric-btn D active" onclick="setMetric('D')" id="mb-D">D Delta</button>
+  <button class="metric-btn G" onclick="setMetric('G')" id="mb-G">G Gamma</button>
+  <button class="metric-btn P" onclick="setMetric('P')" id="mb-P">P Price</button>
+  <button class="metric-btn V" onclick="setMetric('V')" id="mb-V">V Volume</button>
+
+  <div class="sep"></div>
+
+  <button class="res-btn active" onclick="setRes('1min')" id="rb-1min">1 MIN</button>
+  <button class="res-btn" onclick="setRes('5min')" id="rb-5min">5 MIN</button>
+
+  <span class="kbd-hint">| keyboard: D G P V · 1 5 · E O S X C A B R</span>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <!-- Stats -->
+    <div class="sb-section">
+      <div class="sb-head">Session Stats</div>
+      <div class="sb-stat"><span class="lbl">Spikes</span><span class="v" style="color:var(--spike)" id="stat-spikes">—</span></div>
+      <div class="sb-stat"><span class="lbl">Drops</span><span class="v" style="color:var(--drop)" id="stat-drops">—</span></div>
+      <div class="sb-stat"><span class="lbl">Opp Confirms</span><span class="v" style="color:var(--opp)" id="stat-confs">—</span></div>
+    </div>
+
+    <!-- Filters -->
+    <div class="sb-section sb-filter">
+      <div class="sb-head" style="padding:0 0 4px 0;background:transparent;font-size:10px">VIEW</div>
+      <div class="flt-row">
+        <button class="flt-btn active" onclick="setSbView('events',this)" id="v-events">Events</button>
+        <button class="flt-btn" onclick="setSbView('opp',this)" id="v-opp">Opp</button>
+      </div>
+      <div class="flt-row" id="evt-filters">
+        <button class="flt-btn spk active" onclick="toggleEvtFilter('spike',this)">⬆ Spike</button>
+        <button class="flt-btn drp active" onclick="toggleEvtFilter('drop',this)">⬇ Drop</button>
+        <button class="flt-btn ce active" onclick="toggleEvtFilter('CE',this)">CE</button>
+        <button class="flt-btn pe active" onclick="toggleEvtFilter('PE',this)">PE</button>
+        <button class="flt-btn active" onclick="toggleEvtFilter('Delta%',this)">Δ</button>
+        <button class="flt-btn active" onclick="toggleEvtFilter('Gamma%',this)">Γ</button>
+        <button class="flt-btn active" onclick="toggleEvtFilter('Price%',this)">P</button>
+        <button class="flt-btn active" onclick="toggleEvtFilter('Volume%',this)">V</button>
+      </div>
+      <div class="flt-row" id="opp-filters" style="display:none">
+        <button class="flt-btn bull active" onclick="setOppFilter('all',this)">All</button>
+        <button class="flt-btn bull" onclick="setOppFilter('bull',this)">🟢 Bull</button>
+        <button class="flt-btn bear" onclick="setOppFilter('bear',this)">🔴 Bear</button>
+        <button class="flt-btn active" onclick="setOppFilterMetric('Delta%',this)">Δ</button>
+        <button class="flt-btn active" onclick="setOppFilterMetric('Gamma%',this)">Γ</button>
+        <button class="flt-btn active" onclick="setOppFilterMetric('Price%',this)">P</button>
+        <button class="flt-btn active" onclick="setOppFilterMetric('Volume%',this)">V</button>
+      </div>
+      <input class="sb-search" id="sbSearch" placeholder="Search time / strike …" oninput="renderSidebar()">
+    </div>
+
+    <!-- List -->
+    <div class="sb-table-wrap">
+      <div id="sbList"></div>
+      <div class="count-lbl" id="sbCount"></div>
+    </div>
+  </div>
+
+  <!-- CHARTS -->
+  <div class="charts-area" id="chartsArea">
+    <div class="chart-row">
+      <div class="chart-box">
+        <div class="ch-title">
+          <span>CE <span id="ce-lbl">Delta%</span></span>
+          <span class="ch-thr" id="ce-thr">thr ±5%</span>
+        </div>
+        <canvas id="ceChart"></canvas>
+      </div>
+      <div class="chart-box">
+        <div class="ch-title">
+          <span>PE <span id="pe-lbl">Delta%</span></span>
+          <span class="ch-thr" id="pe-thr">thr ±5%</span>
+        </div>
+        <canvas id="peChart"></canvas>
+      </div>
+    </div>
+    <div class="chart-row" style="flex:0.6">
+      <div class="chart-box full">
+        <div class="ch-title">
+          CE vs PE overlay — <span id="both-lbl">Delta%</span>
+          <span style="color:var(--muted2);font-weight:400"><span style="color:var(--ce)">■</span> CE &nbsp;<span style="color:var(--pe)">■</span> PE</span>
+        </div>
+        <canvas id="bothChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- SHORTCUTS -->
+  <div class="shortcuts-area hidden" id="shortcutsArea">
+    <div class="sc-grid">
+      <div class="sc-card">
+        <h3>⌨ METRIC KEYS</h3>
+        <code class="cmd"><span class="k">D</span>  Delta %  — option delta change/candle</code>
+        <code class="cmd"><span class="k">G</span>  Gamma %  — gamma change/candle</code>
+        <code class="cmd"><span class="k">P</span>  Price %  — LTP % change/candle</code>
+        <code class="cmd"><span class="k">V</span>  Volume % — volume % change/candle</code>
+      </div>
+      <div class="sc-card">
+        <h3>🕐 RESOLUTION KEYS</h3>
+        <code class="cmd"><span class="k">1</span>  1-minute bars — raw candle data</code>
+        <code class="cmd"><span class="k">5</span>  5-minute bars — max/min aggregated</code>
+        <p style="margin-top:6px">5-min takes the max CE spike and min PE drop within each 5-min window — good for cutting noise.</p>
+      </div>
+      <div class="sc-card">
+        <h3>📋 VIEW KEYS</h3>
+        <code class="cmd"><span class="k">E</span>  Show Events sidebar</code>
+        <code class="cmd"><span class="k">S</span>  Spikes only</code>
+        <code class="cmd"><span class="k">X</span>  Drops only</code>
+        <code class="cmd"><span class="k">C</span>  CE side only</code>
+        <code class="cmd"><span class="k">A</span>  PE side only</code>
+        <code class="cmd"><span class="k">O</span>  Opposite confirmations</code>
+        <code class="cmd"><span class="k">B</span>  Bullish confirms (CE↑ PE↓)</code>
+        <code class="cmd"><span class="k">R</span>  Bearish confirms (PE↑ CE↓)</code>
+      </div>
+      <div class="sc-card">
+        <h3>📖 READING SIGNALS</h3>
+        <p>
+          <span style="color:var(--spike)">▲ CE spike</span> — calls gaining, bullish pressure<br>
+          <span style="color:var(--drop)">▼ CE drop</span> — calls unwinding, bearish pressure<br>
+          <span style="color:var(--spike)">▲ PE spike</span> — puts gaining, bearish pressure<br>
+          <span style="color:var(--drop)">▼ PE drop</span> — puts unwinding, bullish pressure<br><br>
+          <span style="color:var(--opp)">CE↑ + PE↓ same strike = BULLISH confirm</span><br>
+          <span style="color:var(--opp)">PE↑ + CE↓ same strike = BEARISH confirm</span>
+        </p>
+      </div>
+      <div class="sc-card">
+        <h3>⚙ SPIKE THRESHOLDS</h3>
+        <code class="cmd">Delta %   ≥ ±5.0 %</code>
+        <code class="cmd">Gamma %   ≥ ±3.0 %</code>
+        <code class="cmd">Price %   ≥ ±3.0 %</code>
+        <code class="cmd">Volume %  ≥ ±50 %</code>
+        <p style="margin-top:6px">Bars highlighted bright when they cross these thresholds.</p>
+      </div>
+      <div class="sc-card">
+        <h3>🚀 FAST WORKFLOW</h3>
+        <p>
+          1. Press <span class="k">O</span> → check opposite confirms<br>
+          2. Filter <span class="k">B</span> bullish / <span class="k">R</span> bearish<br>
+          3. Press <span class="k">D</span> → see Delta chart at that time<br>
+          4. Press <span class="k">V</span> → confirm with volume<br>
+          5. Toggle <span class="k">5</span> → 5-min to see macro trend<br>
+          6. Toggle <span class="k">1</span> → back to 1-min for entry timing
+        </p>
+      </div>
+    </div>
+  </div>
+
+</div><!-- .main -->
+
+<script>
+// ── DATA ──
+const DATA = {"ts1": [{"ts": "09:20", "ce_d": 0.0, "pe_d": 0.0, "ce_g": 0.0, "pe_g": 0.0, "ce_p": 0.0, "pe_p": 0.0, "ce_v": 0.0, "pe_v": 0.0, "spot": 23630.55}, {"ts": "09:25", "ce_d": -2.14, "pe_d": 1.37, "ce_g": 1.28, "pe_g": -3.28, "ce_p": 0.01, "pe_p": 2.68, "ce_v": 50.0, "pe_v": -53.39, "spot": 23590.3}, {"ts": "09:30", "ce_d": 7.65, "pe_d": -7.29, "ce_g": 4.04, "pe_g": -4.21, "ce_p": 3.0, "pe_p": -3.39, "ce_v": 64.81, "pe_v": -92.34, "spot": 23605.95}, {"ts": "09:35", "ce_d": -12.2, "pe_d": 4.53, "ce_g": -6.66, "pe_g": -7.24, "ce_p": -5.1, "pe_p": 4.79, "ce_v": 64.29, "pe_v": -20.2, "spot": 23587.0}, {"ts": "09:40", "ce_d": 1.59, "pe_d": -2.3, "ce_g": 1.14, "pe_g": 0.9, "ce_p": 0.41, "pe_p": -2.98, "ce_v": 61.64, "pe_v": 59.01, "spot": 23612.5}, {"ts": "09:45", "ce_d": 10.18, "pe_d": -8.82, "ce_g": 6.04, "pe_g": -5.57, "ce_p": 3.52, "pe_p": -3.43, "ce_v": 55.05, "pe_v": -60.71, "spot": 23592.1}, {"ts": "09:50", "ce_d": 0.44, "pe_d": -0.6, "ce_g": 1.54, "pe_g": -1.16, "ce_p": 0.96, "pe_p": 0.46, "ce_v": 44.08, "pe_v": -18.22, "spot": 23579.9}, {"ts": "09:55", "ce_d": -1.97, "pe_d": 1.24, "ce_g": 0.92, "pe_g": -2.91, "ce_p": -0.09, "pe_p": 1.37, "ce_v": 90.38, "pe_v": -51.91, "spot": 23578.15}, {"ts": "10:00", "ce_d": 0.66, "pe_d": -0.71, "ce_g": 0.6, "pe_g": -0.65, "ce_p": 0.19, "pe_p": -0.33, "ce_v": 85.98, "pe_v": -35.02, "spot": 23563.3}, {"ts": "10:05", "ce_d": 2.39, "pe_d": -1.49, "ce_g": 0.73, "pe_g": -1.26, "ce_p": 1.81, "pe_p": -1.36, "ce_v": 70.86, "pe_v": -37.49, "spot": 23541.85}, {"ts": "10:10", "ce_d": -1.84, "pe_d": 1.82, "ce_g": 2.4, "pe_g": -2.35, "ce_p": -0.55, "pe_p": 1.48, "ce_v": 33.33, "pe_v": -67.3, "spot": 23561.65}, {"ts": "10:15", "ce_d": -0.56, "pe_d": 1.2, "ce_g": 1.81, "pe_g": -0.8, "ce_p": 0.79, "pe_p": -0.16, "ce_v": 88.89, "pe_v": 17.92, "spot": 23548.45}, {"ts": "10:20", "ce_d": -0.49, "pe_d": 0.84, "ce_g": 1.11, "pe_g": -0.45, "ce_p": 0.5, "pe_p": -0.41, "ce_v": 37.25, "pe_v": -80.56, "spot": 23555.3}, {"ts": "10:25", "ce_d": 2.65, "pe_d": -2.57, "ce_g": 1.15, "pe_g": -1.45, "ce_p": 1.36, "pe_p": -1.77, "ce_v": 39.68, "pe_v": -44.92, "spot": 23553.75}, {"ts": "10:30", "ce_d": -0.47, "pe_d": 0.27, "ce_g": -0.41, "pe_g": -0.43, "ce_p": 0.86, "pe_p": -0.48, "ce_v": 67.0, "pe_v": 5.94, "spot": 23538.55}, {"ts": "10:35", "ce_d": 1.38, "pe_d": -0.85, "ce_g": 1.65, "pe_g": -1.25, "ce_p": 0.13, "pe_p": -0.81, "ce_v": -26.67, "pe_v": -71.36, "spot": 23524.75}, {"ts": "10:40", "ce_d": -0.61, "pe_d": 0.5, "ce_g": 1.78, "pe_g": -2.07, "ce_p": -0.24, "pe_p": 0.44, "ce_v": 60.0, "pe_v": -58.18, "spot": 23539.35}, {"ts": "10:45", "ce_d": 3.76, "pe_d": -3.88, "ce_g": 2.31, "pe_g": -2.32, "ce_p": 2.03, "pe_p": -2.71, "ce_v": 39.39, "pe_v": -61.54, "spot": 23544.85}, {"ts": "10:50", "ce_d": 0.24, "pe_d": -0.33, "ce_g": 0.45, "pe_g": -0.56, "ce_p": 0.33, "pe_p": 0.14, "ce_v": -42.24, "pe_v": -85.06, "spot": 23571.15}, {"ts": "10:55", "ce_d": 0.67, "pe_d": -0.62, "ce_g": 1.17, "pe_g": -0.86, "ce_p": 0.2, "pe_p": -0.44, "ce_v": 37.42, "pe_v": -87.8, "spot": 23595.05}, {"ts": "11:00", "ce_d": 8.54, "pe_d": -9.14, "ce_g": 4.46, "pe_g": -4.46, "ce_p": 3.35, "pe_p": -4.53, "ce_v": 52.72, "pe_v": -74.13, "spot": 23584.9}, {"ts": "11:05", "ce_d": -1.46, "pe_d": 1.64, "ce_g": 1.43, "pe_g": -1.17, "ce_p": -0.78, "pe_p": -0.37, "ce_v": 81.25, "pe_v": -62.26, "spot": 23587.25}, {"ts": "11:10", "ce_d": 0.13, "pe_d": -0.08, "ce_g": 0.16, "pe_g": -0.4, "ce_p": 0.82, "pe_p": -0.28, "ce_v": 39.47, "pe_v": -78.92, "spot": 23609.7}, {"ts": "11:15", "ce_d": -1.19, "pe_d": 0.99, "ce_g": 0.3, "pe_g": -1.29, "ce_p": 0.78, "pe_p": 0.41, "ce_v": 92.45, "pe_v": -28.57, "spot": 23602.15}, {"ts": "11:20", "ce_d": -1.65, "pe_d": 2.32, "ce_g": 2.34, "pe_g": -1.38, "ce_p": 0.02, "pe_p": 1.17, "ce_v": 51.85, "pe_v": -44.0, "spot": 23600.0}, {"ts": "11:25", "ce_d": 0.65, "pe_d": -0.35, "ce_g": -0.26, "pe_g": 0.07, "ce_p": 1.08, "pe_p": -0.78, "ce_v": 60.47, "pe_v": -71.43, "spot": 23581.0}, {"ts": "11:30", "ce_d": 0.49, "pe_d": -1.26, "ce_g": -0.15, "pe_g": 0.3, "ce_p": 1.13, "pe_p": -1.71, "ce_v": 6.52, "pe_v": -46.1, "spot": 23559.25}, {"ts": "11:35", "ce_d": 5.63, "pe_d": -6.9, "ce_g": 2.98, "pe_g": -2.93, "ce_p": 2.35, "pe_p": -4.1, "ce_v": 62.41, "pe_v": -69.64, "spot": 23553.95}, {"ts": "11:40", "ce_d": -0.6, "pe_d": 0.74, "ce_g": 1.3, "pe_g": -1.24, "ce_p": -0.61, "pe_p": 0.0, "ce_v": 24.2, "pe_v": -86.21, "spot": 23564.0}, {"ts": "11:45", "ce_d": -2.86, "pe_d": 2.18, "ce_g": 1.46, "pe_g": -3.35, "ce_p": -2.19, "pe_p": 3.4, "ce_v": 93.88, "pe_v": -2.94, "spot": 23540.35}, {"ts": "11:50", "ce_d": 3.55, "pe_d": -3.36, "ce_g": 2.32, "pe_g": -2.22, "ce_p": 1.34, "pe_p": -1.25, "ce_v": 79.78, "pe_v": -43.48, "spot": 23559.85}, {"ts": "11:55", "ce_d": -0.74, "pe_d": 1.58, "ce_g": 2.59, "pe_g": -1.35, "ce_p": -0.04, "pe_p": 0.76, "ce_v": -30.0, "pe_v": -65.45, "spot": 23548.9}, {"ts": "12:00", "ce_d": 1.86, "pe_d": -0.86, "ce_g": -0.38, "pe_g": -0.32, "ce_p": 2.03, "pe_p": -1.1, "ce_v": 48.75, "pe_v": -61.24, "spot": 23494.7}, {"ts": "12:05", "ce_d": 1.89, "pe_d": -2.42, "ce_g": 1.6, "pe_g": -1.83, "ce_p": 0.37, "pe_p": -0.51, "ce_v": 71.43, "pe_v": -40.16, "spot": 23503.7}, {"ts": "12:10", "ce_d": -0.05, "pe_d": 0.37, "ce_g": 1.0, "pe_g": -0.2, "ce_p": 0.5, "pe_p": -0.11, "ce_v": 23.5, "pe_v": -58.31, "spot": 23504.8}, {"ts": "12:15", "ce_d": -1.52, "pe_d": 1.43, "ce_g": 2.02, "pe_g": -2.45, "ce_p": -0.71, "pe_p": 1.58, "ce_v": -0.43, "pe_v": -79.69, "spot": 23523.0}, {"ts": "12:20", "ce_d": -1.01, "pe_d": -0.56, "ce_g": 3.59, "pe_g": -2.64, "ce_p": 1.49, "pe_p": -1.5, "ce_v": 20.63, "pe_v": -46.61, "spot": 23515.95}, {"ts": "12:25", "ce_d": -0.53, "pe_d": 0.61, "ce_g": 0.57, "pe_g": -0.35, "ce_p": 0.79, "pe_p": -0.31, "ce_v": 72.22, "pe_v": -46.97, "spot": 23516.75}, {"ts": "12:30", "ce_d": 1.19, "pe_d": -2.01, "ce_g": 0.52, "pe_g": -0.53, "ce_p": 0.94, "pe_p": -1.58, "ce_v": 76.39, "pe_v": -22.82, "spot": 23518.75}, {"ts": "12:35", "ce_d": 2.64, "pe_d": -3.62, "ce_g": 1.9, "pe_g": -2.05, "ce_p": 1.21, "pe_p": -2.56, "ce_v": 20.8, "pe_v": -78.26, "spot": 23518.55}, {"ts": "12:40", "ce_d": -1.18, "pe_d": 0.87, "ce_g": 1.2, "pe_g": -1.68, "ce_p": 0.0, "pe_p": 0.9, "ce_v": 27.74, "pe_v": -84.13, "spot": 23510.1}, {"ts": "12:45", "ce_d": 1.05, "pe_d": -2.4, "ce_g": 0.4, "pe_g": -0.32, "ce_p": 2.07, "pe_p": -2.17, "ce_v": 51.52, "pe_v": -16.67, "spot": 23516.65}, {"ts": "12:50", "ce_d": -0.45, "pe_d": 0.33, "ce_g": 0.56, "pe_g": -0.83, "ce_p": -0.51, "pe_p": 0.2, "ce_v": 91.89, "pe_v": -22.48, "spot": 23530.9}, {"ts": "12:55", "ce_d": -0.97, "pe_d": 1.14, "ce_g": 2.23, "pe_g": -2.01, "ce_p": -0.1, "pe_p": 0.99, "ce_v": 70.73, "pe_v": 0.0, "spot": 23522.6}, {"ts": "13:00", "ce_d": -0.48, "pe_d": 0.39, "ce_g": 0.95, "pe_g": -1.15, "ce_p": -0.47, "pe_p": 0.6, "ce_v": 33.33, "pe_v": -87.8, "spot": 23510.5}, {"ts": "13:05", "ce_d": 1.69, "pe_d": -1.78, "ce_g": 1.12, "pe_g": -1.07, "ce_p": 0.97, "pe_p": -1.09, "ce_v": -20.0, "pe_v": -68.12, "spot": 23498.55}, {"ts": "13:10", "ce_d": -2.62, "pe_d": 3.0, "ce_g": 1.73, "pe_g": -1.24, "ce_p": -1.33, "pe_p": 1.72, "ce_v": 95.12, "pe_v": -39.7, "spot": 23468.95}, {"ts": "13:15", "ce_d": 3.82, "pe_d": -5.12, "ce_g": 2.42, "pe_g": -2.63, "ce_p": 1.66, "pe_p": -2.51, "ce_v": 94.74, "pe_v": -50.93, "spot": 23467.5}, {"ts": "13:20", "ce_d": 0.74, "pe_d": -0.86, "ce_g": -0.27, "pe_g": -1.04, "ce_p": 0.86, "pe_p": -1.51, "ce_v": -4.4, "pe_v": -84.44, "spot": 23475.35}, {"ts": "13:25", "ce_d": 2.48, "pe_d": -2.82, "ce_g": 1.85, "pe_g": -1.6, "ce_p": 1.44, "pe_p": -0.99, "ce_v": 42.86, "pe_v": -59.15, "spot": 23473.85}, {"ts": "13:30", "ce_d": -0.65, "pe_d": 0.09, "ce_g": 1.46, "pe_g": -2.46, "ce_p": -0.78, "pe_p": 1.9, "ce_v": 32.22, "pe_v": -74.29, "spot": 23478.7}, {"ts": "13:35", "ce_d": 0.16, "pe_d": -0.33, "ce_g": 1.0, "pe_g": -0.96, "ce_p": 0.96, "pe_p": -0.06, "ce_v": 51.32, "pe_v": -64.71, "spot": 23484.75}, {"ts": "13:40", "ce_d": -0.89, "pe_d": 0.45, "ce_g": 2.57, "pe_g": -3.15, "ce_p": -0.1, "pe_p": 0.91, "ce_v": 21.13, "pe_v": -67.57, "spot": 23482.2}, {"ts": "13:45", "ce_d": -0.77, "pe_d": 2.42, "ce_g": 2.97, "pe_g": -2.66, "ce_p": 1.87, "pe_p": 1.64, "ce_v": 66.67, "pe_v": 36.08, "spot": 23473.25}, {"ts": "13:50", "ce_d": 0.84, "pe_d": -0.44, "ce_g": 0.16, "pe_g": -0.61, "ce_p": 0.63, "pe_p": 0.02, "ce_v": 19.35, "pe_v": -52.72, "spot": 23463.1}, {"ts": "13:55", "ce_d": 4.01, "pe_d": -4.52, "ce_g": 0.74, "pe_g": -2.77, "ce_p": 2.49, "pe_p": -2.22, "ce_v": 72.25, "pe_v": -26.6, "spot": 23459.45}, {"ts": "14:00", "ce_d": -0.05, "pe_d": 0.33, "ce_g": 1.89, "pe_g": -1.62, "ce_p": -1.57, "pe_p": 1.25, "ce_v": 84.0, "pe_v": 0.25, "spot": 23453.15}, {"ts": "14:05", "ce_d": -0.31, "pe_d": 0.15, "ce_g": 1.69, "pe_g": -2.08, "ce_p": -1.31, "pe_p": 1.98, "ce_v": 77.14, "pe_v": -24.76, "spot": 23439.4}, {"ts": "14:10", "ce_d": 1.57, "pe_d": -1.92, "ce_g": 1.36, "pe_g": -1.06, "ce_p": 0.63, "pe_p": -0.71, "ce_v": 28.26, "pe_v": -28.57, "spot": 23428.1}, {"ts": "14:15", "ce_d": -1.19, "pe_d": 1.21, "ce_g": 2.26, "pe_g": -2.47, "ce_p": -0.88, "pe_p": 1.89, "ce_v": 84.09, "pe_v": -46.05, "spot": 23410.65}, {"ts": "14:20", "ce_d": 1.42, "pe_d": -5.83, "ce_g": 3.25, "pe_g": -4.27, "ce_p": 1.21, "pe_p": -2.91, "ce_v": -30.67, "pe_v": -70.06, "spot": 23411.2}, {"ts": "14:25", "ce_d": 6.3, "pe_d": -7.34, "ce_g": 4.16, "pe_g": -4.31, "ce_p": 2.65, "pe_p": -4.65, "ce_v": 3.51, "pe_v": -64.74, "spot": 23404.15}, {"ts": "14:30", "ce_d": 5.54, "pe_d": -6.37, "ce_g": 2.9, "pe_g": -3.36, "ce_p": 2.38, "pe_p": -3.07, "ce_v": 72.22, "pe_v": 6.12, "spot": 23403.75}, {"ts": "14:35", "ce_d": 3.27, "pe_d": -3.86, "ce_g": 1.9, "pe_g": -2.17, "ce_p": 1.64, "pe_p": -1.89, "ce_v": 65.91, "pe_v": -33.24, "spot": 23400.1}, {"ts": "14:40", "ce_d": -0.29, "pe_d": 0.44, "ce_g": 1.08, "pe_g": -1.26, "ce_p": -0.2, "pe_p": 0.68, "ce_v": 27.18, "pe_v": -75.23, "spot": 23417.75}, {"ts": "14:45", "ce_d": 0.1, "pe_d": -0.21, "ce_g": 0.01, "pe_g": 0.06, "ce_p": 0.76, "pe_p": -0.83, "ce_v": 60.0, "pe_v": -69.57, "spot": 23417.2}, {"ts": "14:50", "ce_d": -3.03, "pe_d": 2.49, "ce_g": 2.68, "pe_g": -5.33, "ce_p": -2.11, "pe_p": 2.47, "ce_v": -19.57, "pe_v": -60.36, "spot": 23390.95}, {"ts": "14:55", "ce_d": -0.51, "pe_d": 0.09, "ce_g": 0.17, "pe_g": -0.97, "ce_p": 0.29, "pe_p": -0.56, "ce_v": 44.93, "pe_v": -75.56, "spot": 23379.65}, {"ts": "15:00", "ce_d": -0.39, "pe_d": 0.14, "ce_g": 0.05, "pe_g": -0.63, "ce_p": 0.05, "pe_p": 0.45, "ce_v": 79.07, "pe_v": 10.96, "spot": 23372.6}, {"ts": "15:05", "ce_d": -1.52, "pe_d": 1.58, "ce_g": 1.11, "pe_g": -2.46, "ce_p": 0.18, "pe_p": 0.17, "ce_v": 7.89, "pe_v": -59.18, "spot": 23385.75}, {"ts": "15:10", "ce_d": 2.92, "pe_d": -3.9, "ce_g": 1.17, "pe_g": -1.82, "ce_p": 1.67, "pe_p": -2.23, "ce_v": 58.17, "pe_v": -59.09, "spot": 23408.6}, {"ts": "15:15", "ce_d": 3.75, "pe_d": -2.95, "ce_g": 1.11, "pe_g": -0.7, "ce_p": 2.35, "pe_p": -2.77, "ce_v": 77.42, "pe_v": -26.95, "spot": 23393.4}, {"ts": "15:20", "ce_d": 0.49, "pe_d": -0.54, "ce_g": -0.1, "pe_g": -0.12, "ce_p": 1.31, "pe_p": -0.83, "ce_v": 65.93, "pe_v": -41.67, "spot": 23376.9}, {"ts": "15:25", "ce_d": 1.89, "pe_d": -1.18, "ce_g": 0.39, "pe_g": -1.39, "ce_p": 1.23, "pe_p": 0.51, "ce_v": 71.37, "pe_v": -39.73, "spot": 23373.45}], "ts5": [{"ts": "09:20", "ce_d": 0.0, "pe_d": 0.0, "ce_g": 0.0, "pe_g": 0.0, "ce_p": 0.0, "pe_p": 0.0, "ce_v": 0.0, "pe_v": 0.0, "spot": 23630.55}, {"ts": "09:25", "ce_d": -2.14, "pe_d": 1.37, "ce_g": 1.28, "pe_g": -3.28, "ce_p": 0.01, "pe_p": 2.68, "ce_v": 50.0, "pe_v": -53.39, "spot": 23590.3}, {"ts": "09:30", "ce_d": 7.65, "pe_d": -7.29, "ce_g": 4.04, "pe_g": -4.21, "ce_p": 3.0, "pe_p": -3.39, "ce_v": 64.81, "pe_v": -92.34, "spot": 23605.95}, {"ts": "09:35", "ce_d": -12.2, "pe_d": 4.53, "ce_g": -6.66, "pe_g": -7.24, "ce_p": -5.1, "pe_p": 4.79, "ce_v": 64.29, "pe_v": -20.2, "spot": 23587.0}, {"ts": "09:40", "ce_d": 1.59, "pe_d": -2.3, "ce_g": 1.14, "pe_g": 0.9, "ce_p": 0.41, "pe_p": -2.98, "ce_v": 61.64, "pe_v": 59.01, "spot": 23612.5}, {"ts": "09:45", "ce_d": 10.18, "pe_d": -8.82, "ce_g": 6.04, "pe_g": -5.57, "ce_p": 3.52, "pe_p": -3.43, "ce_v": 55.05, "pe_v": -60.71, "spot": 23592.1}, {"ts": "09:50", "ce_d": 0.44, "pe_d": -0.6, "ce_g": 1.54, "pe_g": -1.16, "ce_p": 0.96, "pe_p": 0.46, "ce_v": 44.08, "pe_v": -18.22, "spot": 23579.9}, {"ts": "09:55", "ce_d": -1.97, "pe_d": 1.24, "ce_g": 0.92, "pe_g": -2.91, "ce_p": -0.09, "pe_p": 1.37, "ce_v": 90.38, "pe_v": -51.91, "spot": 23578.15}, {"ts": "10:00", "ce_d": 0.66, "pe_d": -0.71, "ce_g": 0.6, "pe_g": -0.65, "ce_p": 0.19, "pe_p": -0.33, "ce_v": 85.98, "pe_v": -35.02, "spot": 23563.3}, {"ts": "10:05", "ce_d": 2.39, "pe_d": -1.49, "ce_g": 0.73, "pe_g": -1.26, "ce_p": 1.81, "pe_p": -1.36, "ce_v": 70.86, "pe_v": -37.49, "spot": 23541.85}, {"ts": "10:10", "ce_d": -1.84, "pe_d": 1.82, "ce_g": 2.4, "pe_g": -2.35, "ce_p": -0.55, "pe_p": 1.48, "ce_v": 33.33, "pe_v": -67.3, "spot": 23561.65}, {"ts": "10:15", "ce_d": -0.56, "pe_d": 1.2, "ce_g": 1.81, "pe_g": -0.8, "ce_p": 0.79, "pe_p": -0.16, "ce_v": 88.89, "pe_v": 17.92, "spot": 23548.45}, {"ts": "10:20", "ce_d": -0.49, "pe_d": 0.84, "ce_g": 1.11, "pe_g": -0.45, "ce_p": 0.5, "pe_p": -0.41, "ce_v": 37.25, "pe_v": -80.56, "spot": 23555.3}, {"ts": "10:25", "ce_d": 2.65, "pe_d": -2.57, "ce_g": 1.15, "pe_g": -1.45, "ce_p": 1.36, "pe_p": -1.77, "ce_v": 39.68, "pe_v": -44.92, "spot": 23553.75}, {"ts": "10:30", "ce_d": -0.47, "pe_d": 0.27, "ce_g": -0.41, "pe_g": -0.43, "ce_p": 0.86, "pe_p": -0.48, "ce_v": 67.0, "pe_v": 5.94, "spot": 23538.55}, {"ts": "10:35", "ce_d": 1.38, "pe_d": -0.85, "ce_g": 1.65, "pe_g": -1.25, "ce_p": 0.13, "pe_p": -0.81, "ce_v": -26.67, "pe_v": -71.36, "spot": 23524.75}, {"ts": "10:40", "ce_d": -0.61, "pe_d": 0.5, "ce_g": 1.78, "pe_g": -2.07, "ce_p": -0.24, "pe_p": 0.44, "ce_v": 60.0, "pe_v": -58.18, "spot": 23539.35}, {"ts": "10:45", "ce_d": 3.76, "pe_d": -3.88, "ce_g": 2.31, "pe_g": -2.32, "ce_p": 2.03, "pe_p": -2.71, "ce_v": 39.39, "pe_v": -61.54, "spot": 23544.85}, {"ts": "10:50", "ce_d": 0.24, "pe_d": -0.33, "ce_g": 0.45, "pe_g": -0.56, "ce_p": 0.33, "pe_p": 0.14, "ce_v": -42.24, "pe_v": -85.06, "spot": 23571.15}, {"ts": "10:55", "ce_d": 0.67, "pe_d": -0.62, "ce_g": 1.17, "pe_g": -0.86, "ce_p": 0.2, "pe_p": -0.44, "ce_v": 37.42, "pe_v": -87.8, "spot": 23595.05}, {"ts": "11:00", "ce_d": 8.54, "pe_d": -9.14, "ce_g": 4.46, "pe_g": -4.46, "ce_p": 3.35, "pe_p": -4.53, "ce_v": 52.72, "pe_v": -74.13, "spot": 23584.9}, {"ts": "11:05", "ce_d": -1.46, "pe_d": 1.64, "ce_g": 1.43, "pe_g": -1.17, "ce_p": -0.78, "pe_p": -0.37, "ce_v": 81.25, "pe_v": -62.26, "spot": 23587.25}, {"ts": "11:10", "ce_d": 0.13, "pe_d": -0.08, "ce_g": 0.16, "pe_g": -0.4, "ce_p": 0.82, "pe_p": -0.28, "ce_v": 39.47, "pe_v": -78.92, "spot": 23609.7}, {"ts": "11:15", "ce_d": -1.19, "pe_d": 0.99, "ce_g": 0.3, "pe_g": -1.29, "ce_p": 0.78, "pe_p": 0.41, "ce_v": 92.45, "pe_v": -28.57, "spot": 23602.15}, {"ts": "11:20", "ce_d": -1.65, "pe_d": 2.32, "ce_g": 2.34, "pe_g": -1.38, "ce_p": 0.02, "pe_p": 1.17, "ce_v": 51.85, "pe_v": -44.0, "spot": 23600.0}, {"ts": "11:25", "ce_d": 0.65, "pe_d": -0.35, "ce_g": -0.26, "pe_g": 0.07, "ce_p": 1.08, "pe_p": -0.78, "ce_v": 60.47, "pe_v": -71.43, "spot": 23581.0}, {"ts": "11:30", "ce_d": 0.49, "pe_d": -1.26, "ce_g": -0.15, "pe_g": 0.3, "ce_p": 1.13, "pe_p": -1.71, "ce_v": 6.52, "pe_v": -46.1, "spot": 23559.25}, {"ts": "11:35", "ce_d": 5.63, "pe_d": -6.9, "ce_g": 2.98, "pe_g": -2.93, "ce_p": 2.35, "pe_p": -4.1, "ce_v": 62.41, "pe_v": -69.64, "spot": 23553.95}, {"ts": "11:40", "ce_d": -0.6, "pe_d": 0.74, "ce_g": 1.3, "pe_g": -1.24, "ce_p": -0.61, "pe_p": 0.0, "ce_v": 24.2, "pe_v": -86.21, "spot": 23564.0}, {"ts": "11:45", "ce_d": -2.86, "pe_d": 2.18, "ce_g": 1.46, "pe_g": -3.35, "ce_p": -2.19, "pe_p": 3.4, "ce_v": 93.88, "pe_v": -2.94, "spot": 23540.35}, {"ts": "11:50", "ce_d": 3.55, "pe_d": -3.36, "ce_g": 2.32, "pe_g": -2.22, "ce_p": 1.34, "pe_p": -1.25, "ce_v": 79.78, "pe_v": -43.48, "spot": 23559.85}, {"ts": "11:55", "ce_d": -0.74, "pe_d": 1.58, "ce_g": 2.59, "pe_g": -1.35, "ce_p": -0.04, "pe_p": 0.76, "ce_v": -30.0, "pe_v": -65.45, "spot": 23548.9}, {"ts": "12:00", "ce_d": 1.86, "pe_d": -0.86, "ce_g": -0.38, "pe_g": -0.32, "ce_p": 2.03, "pe_p": -1.1, "ce_v": 48.75, "pe_v": -61.24, "spot": 23494.7}, {"ts": "12:05", "ce_d": 1.89, "pe_d": -2.42, "ce_g": 1.6, "pe_g": -1.83, "ce_p": 0.37, "pe_p": -0.51, "ce_v": 71.43, "pe_v": -40.16, "spot": 23503.7}, {"ts": "12:10", "ce_d": -0.05, "pe_d": 0.37, "ce_g": 1.0, "pe_g": -0.2, "ce_p": 0.5, "pe_p": -0.11, "ce_v": 23.5, "pe_v": -58.31, "spot": 23504.8}, {"ts": "12:15", "ce_d": -1.52, "pe_d": 1.43, "ce_g": 2.02, "pe_g": -2.45, "ce_p": -0.71, "pe_p": 1.58, "ce_v": -0.43, "pe_v": -79.69, "spot": 23523.0}, {"ts": "12:20", "ce_d": -1.01, "pe_d": -0.56, "ce_g": 3.59, "pe_g": -2.64, "ce_p": 1.49, "pe_p": -1.5, "ce_v": 20.63, "pe_v": -46.61, "spot": 23515.95}, {"ts": "12:25", "ce_d": -0.53, "pe_d": 0.61, "ce_g": 0.57, "pe_g": -0.35, "ce_p": 0.79, "pe_p": -0.31, "ce_v": 72.22, "pe_v": -46.97, "spot": 23516.75}, {"ts": "12:30", "ce_d": 1.19, "pe_d": -2.01, "ce_g": 0.52, "pe_g": -0.53, "ce_p": 0.94, "pe_p": -1.58, "ce_v": 76.39, "pe_v": -22.82, "spot": 23518.75}, {"ts": "12:35", "ce_d": 2.64, "pe_d": -3.62, "ce_g": 1.9, "pe_g": -2.05, "ce_p": 1.21, "pe_p": -2.56, "ce_v": 20.8, "pe_v": -78.26, "spot": 23518.55}, {"ts": "12:40", "ce_d": -1.18, "pe_d": 0.87, "ce_g": 1.2, "pe_g": -1.68, "ce_p": 0.0, "pe_p": 0.9, "ce_v": 27.74, "pe_v": -84.13, "spot": 23510.1}, {"ts": "12:45", "ce_d": 1.05, "pe_d": -2.4, "ce_g": 0.4, "pe_g": -0.32, "ce_p": 2.07, "pe_p": -2.17, "ce_v": 51.52, "pe_v": -16.67, "spot": 23516.65}, {"ts": "12:50", "ce_d": -0.45, "pe_d": 0.33, "ce_g": 0.56, "pe_g": -0.83, "ce_p": -0.51, "pe_p": 0.2, "ce_v": 91.89, "pe_v": -22.48, "spot": 23530.9}, {"ts": "12:55", "ce_d": -0.97, "pe_d": 1.14, "ce_g": 2.23, "pe_g": -2.01, "ce_p": -0.1, "pe_p": 0.99, "ce_v": 70.73, "pe_v": 0.0, "spot": 23522.6}, {"ts": "13:00", "ce_d": -0.48, "pe_d": 0.39, "ce_g": 0.95, "pe_g": -1.15, "ce_p": -0.47, "pe_p": 0.6, "ce_v": 33.33, "pe_v": -87.8, "spot": 23510.5}, {"ts": "13:05", "ce_d": 1.69, "pe_d": -1.78, "ce_g": 1.12, "pe_g": -1.07, "ce_p": 0.97, "pe_p": -1.09, "ce_v": -20.0, "pe_v": -68.12, "spot": 23498.55}, {"ts": "13:10", "ce_d": -2.62, "pe_d": 3.0, "ce_g": 1.73, "pe_g": -1.24, "ce_p": -1.33, "pe_p": 1.72, "ce_v": 95.12, "pe_v": -39.7, "spot": 23468.95}, {"ts": "13:15", "ce_d": 3.82, "pe_d": -5.12, "ce_g": 2.42, "pe_g": -2.63, "ce_p": 1.66, "pe_p": -2.51, "ce_v": 94.74, "pe_v": -50.93, "spot": 23467.5}, {"ts": "13:20", "ce_d": 0.74, "pe_d": -0.86, "ce_g": -0.27, "pe_g": -1.04, "ce_p": 0.86, "pe_p": -1.51, "ce_v": -4.4, "pe_v": -84.44, "spot": 23475.35}, {"ts": "13:25", "ce_d": 2.48, "pe_d": -2.82, "ce_g": 1.85, "pe_g": -1.6, "ce_p": 1.44, "pe_p": -0.99, "ce_v": 42.86, "pe_v": -59.15, "spot": 23473.85}, {"ts": "13:30", "ce_d": -0.65, "pe_d": 0.09, "ce_g": 1.46, "pe_g": -2.46, "ce_p": -0.78, "pe_p": 1.9, "ce_v": 32.22, "pe_v": -74.29, "spot": 23478.7}, {"ts": "13:35", "ce_d": 0.16, "pe_d": -0.33, "ce_g": 1.0, "pe_g": -0.96, "ce_p": 0.96, "pe_p": -0.06, "ce_v": 51.32, "pe_v": -64.71, "spot": 23484.75}, {"ts": "13:40", "ce_d": -0.89, "pe_d": 0.45, "ce_g": 2.57, "pe_g": -3.15, "ce_p": -0.1, "pe_p": 0.91, "ce_v": 21.13, "pe_v": -67.57, "spot": 23482.2}, {"ts": "13:45", "ce_d": -0.77, "pe_d": 2.42, "ce_g": 2.97, "pe_g": -2.66, "ce_p": 1.87, "pe_p": 1.64, "ce_v": 66.67, "pe_v": 36.08, "spot": 23473.25}, {"ts": "13:50", "ce_d": 0.84, "pe_d": -0.44, "ce_g": 0.16, "pe_g": -0.61, "ce_p": 0.63, "pe_p": 0.02, "ce_v": 19.35, "pe_v": -52.72, "spot": 23463.1}, {"ts": "13:55", "ce_d": 4.01, "pe_d": -4.52, "ce_g": 0.74, "pe_g": -2.77, "ce_p": 2.49, "pe_p": -2.22, "ce_v": 72.25, "pe_v": -26.6, "spot": 23459.45}, {"ts": "14:00", "ce_d": -0.05, "pe_d": 0.33, "ce_g": 1.89, "pe_g": -1.62, "ce_p": -1.57, "pe_p": 1.25, "ce_v": 84.0, "pe_v": 0.25, "spot": 23453.15}, {"ts": "14:05", "ce_d": -0.31, "pe_d": 0.15, "ce_g": 1.69, "pe_g": -2.08, "ce_p": -1.31, "pe_p": 1.98, "ce_v": 77.14, "pe_v": -24.76, "spot": 23439.4}, {"ts": "14:10", "ce_d": 1.57, "pe_d": -1.92, "ce_g": 1.36, "pe_g": -1.06, "ce_p": 0.63, "pe_p": -0.71, "ce_v": 28.26, "pe_v": -28.57, "spot": 23428.1}, {"ts": "14:15", "ce_d": -1.19, "pe_d": 1.21, "ce_g": 2.26, "pe_g": -2.47, "ce_p": -0.88, "pe_p": 1.89, "ce_v": 84.09, "pe_v": -46.05, "spot": 23410.65}, {"ts": "14:20", "ce_d": 1.42, "pe_d": -5.83, "ce_g": 3.25, "pe_g": -4.27, "ce_p": 1.21, "pe_p": -2.91, "ce_v": -30.67, "pe_v": -70.06, "spot": 23411.2}, {"ts": "14:25", "ce_d": 6.3, "pe_d": -7.34, "ce_g": 4.16, "pe_g": -4.31, "ce_p": 2.65, "pe_p": -4.65, "ce_v": 3.51, "pe_v": -64.74, "spot": 23404.15}, {"ts": "14:30", "ce_d": 5.54, "pe_d": -6.37, "ce_g": 2.9, "pe_g": -3.36, "ce_p": 2.38, "pe_p": -3.07, "ce_v": 72.22, "pe_v": 6.12, "spot": 23403.75}, {"ts": "14:35", "ce_d": 3.27, "pe_d": -3.86, "ce_g": 1.9, "pe_g": -2.17, "ce_p": 1.64, "pe_p": -1.89, "ce_v": 65.91, "pe_v": -33.24, "spot": 23400.1}, {"ts": "14:40", "ce_d": -0.29, "pe_d": 0.44, "ce_g": 1.08, "pe_g": -1.26, "ce_p": -0.2, "pe_p": 0.68, "ce_v": 27.18, "pe_v": -75.23, "spot": 23417.75}, {"ts": "14:45", "ce_d": 0.1, "pe_d": -0.21, "ce_g": 0.01, "pe_g": 0.06, "ce_p": 0.76, "pe_p": -0.83, "ce_v": 60.0, "pe_v": -69.57, "spot": 23417.2}, {"ts": "14:50", "ce_d": -3.03, "pe_d": 2.49, "ce_g": 2.68, "pe_g": -5.33, "ce_p": -2.11, "pe_p": 2.47, "ce_v": -19.57, "pe_v": -60.36, "spot": 23390.95}, {"ts": "14:55", "ce_d": -0.51, "pe_d": 0.09, "ce_g": 0.17, "pe_g": -0.97, "ce_p": 0.29, "pe_p": -0.56, "ce_v": 44.93, "pe_v": -75.56, "spot": 23379.65}, {"ts": "15:00", "ce_d": -0.39, "pe_d": 0.14, "ce_g": 0.05, "pe_g": -0.63, "ce_p": 0.05, "pe_p": 0.45, "ce_v": 79.07, "pe_v": 10.96, "spot": 23372.6}, {"ts": "15:05", "ce_d": -1.52, "pe_d": 1.58, "ce_g": 1.11, "pe_g": -2.46, "ce_p": 0.18, "pe_p": 0.17, "ce_v": 7.89, "pe_v": -59.18, "spot": 23385.75}, {"ts": "15:10", "ce_d": 2.92, "pe_d": -3.9, "ce_g": 1.17, "pe_g": -1.82, "ce_p": 1.67, "pe_p": -2.23, "ce_v": 58.17, "pe_v": -59.09, "spot": 23408.6}, {"ts": "15:15", "ce_d": 3.75, "pe_d": -2.95, "ce_g": 1.11, "pe_g": -0.7, "ce_p": 2.35, "pe_p": -2.77, "ce_v": 77.42, "pe_v": -26.95, "spot": 23393.4}, {"ts": "15:20", "ce_d": 0.49, "pe_d": -0.54, "ce_g": -0.1, "pe_g": -0.12, "ce_p": 1.31, "pe_p": -0.83, "ce_v": 65.93, "pe_v": -41.67, "spot": 23376.9}, {"ts": "15:25", "ce_d": 1.89, "pe_d": -1.18, "ce_g": 0.39, "pe_g": -1.39, "ce_p": 1.23, "pe_p": 0.51, "ce_v": 71.37, "pe_v": -39.73, "spot": 23373.45}], "events": [{"ts": "10:00", "strike": 23500, "side": "PE", "metric": "Volume%", "val": 99.06, "type": "spike", "spot": 23563.3, "strength": "MODERATE", "score": 57.4}, {"ts": "13:45", "strike": 23500, "side": "PE", "metric": "Volume%", "val": 97.76, "type": "spike", "spot": 23473.25, "strength": "MODERATE", "score": 53.7}, {"ts": "10:40", "strike": 23450, "side": "CE", "metric": "Volume%", "val": -96.49, "type": "drop", "spot": 23539.35, "strength": "WEAK", "score": 45.3}, {"ts": "10:15", "strike": 23600, "side": "PE", "metric": "Volume%", "val": 95.68, "type": "spike", "spot": 23548.45, "strength": "WEAK", "score": 45.3}, {"ts": "13:25", "strike": 23550, "side": "PE", "metric": "Volume%", "val": 95.65, "type": "spike", "spot": 23473.85, "strength": "MODERATE", "score": 53.4}, {"ts": "14:35", "strike": 23400, "side": "PE", "metric": "Volume%", "val": 95.26, "type": "spike", "spot": 23400.1, "strength": "MODERATE", "score": 54.5}, {"ts": "13:10", "strike": 23450, "side": "CE", "metric": "Volume%", "val": 95.12, "type": "spike", "spot": 23468.95, "strength": "MODERATE", "score": 53.7}, {"ts": "09:55", "strike": 23450, "side": "CE", "metric": "Volume%", "val": -94.74, "type": "drop", "spot": 23578.15, "strength": "WEAK", "score": 32.1}, {"ts": "13:15", "strike": 23300, "side": "CE", "metric": "Volume%", "val": 94.74, "type": "spike", "spot": 23467.5, "strength": "MODERATE", "score": 63.0}, {"ts": "12:55", "strike": 23550, "side": "PE", "metric": "Volume%", "val": 94.23, "type": "spike", "spot": 23522.6, "strength": "MODERATE", "score": 61.6}, {"ts": "11:45", "strike": 23700, "side": "CE", "metric": "Volume%", "val": 93.88, "type": "spike", "spot": 23540.35, "strength": "VERY WK", "score": 14.7}, {"ts": "14:30", "strike": 23300, "side": "PE", "metric": "Volume%", "val": 92.91, "type": "spike", "spot": 23403.75, "strength": "MODERATE", "score": 51.6}, {"ts": "14:00", "strike": 23350, "side": "PE", "metric": "Volume%", "val": 92.5, "type": "spike", "spot": 23453.15, "strength": "MODERATE", "score": 67.4}, {"ts": "11:15", "strike": 23550, "side": "CE", "metric": "Volume%", "val": 92.45, "type": "spike", "spot": 23602.15, "strength": "MODERATE", "score": 52.6}, {"ts": "09:30", "strike": 23750, "side": "PE", "metric": "Volume%", "val": -92.34, "type": "drop", "spot": 23605.95, "strength": "WEAK", "score": 34.5}, {"ts": "12:50", "strike": 23450, "side": "CE", "metric": "Volume%", "val": 91.89, "type": "spike", "spot": 23530.9, "strength": "MODERATE", "score": 66.8}, {"ts": "12:10", "strike": 23550, "side": "PE", "metric": "Volume%", "val": 91.67, "type": "spike", "spot": 23504.8, "strength": "WEAK", "score": 37.4}, {"ts": "11:45", "strike": 23600, "side": "CE", "metric": "Volume%", "val": 91.53, "type": "spike", "spot": 23540.35, "strength": "VERY WK", "score": 23.4}, {"ts": "09:45", "strike": 23450, "side": "CE", "metric": "Volume%", "val": -91.3, "type": "drop", "spot": 23592.1, "strength": "MODERATE", "score": 50.3}, {"ts": "14:05", "strike": 23550, "side": "PE", "metric": "Volume%", "val": 90.62, "type": "spike", "spot": 23439.4, "strength": "WEAK", "score": 25.3}, {"ts": "09:55", "strike": 23650, "side": "CE", "metric": "Volume%", "val": 90.38, "type": "spike", "spot": 23578.15, "strength": "WEAK", "score": 27.6}, {"ts": "10:25", "strike": 23400, "side": "CE", "metric": "Volume%", "val": -90.0, "type": "drop", "spot": 23553.75, "strength": "WEAK", "score": 31.6}, {"ts": "11:45", "strike": 23600, "side": "PE", "metric": "Volume%", "val": 89.8, "type": "spike", "spot": 23540.35, "strength": "WEAK", "score": 27.1}, {"ts": "10:35", "strike": 23400, "side": "CE", "metric": "Volume%", "val": -89.29, "type": "drop", "spot": 23524.75, "strength": "WEAK", "score": 36.1}, {"ts": "10:15", "strike": 23400, "side": "CE", "metric": "Volume%", "val": 88.89, "type": "spike", "spot": 23548.45, "strength": "WEAK", "score": 35.0}, {"ts": "10:55", "strike": 23750, "side": "PE", "metric": "Volume%", "val": -87.8, "type": "drop", "spot": 23595.05, "strength": "WEAK", "score": 49.7}, {"ts": "13:00", "strike": 23650, "side": "PE", "metric": "Volume%", "val": -87.8, "type": "drop", "spot": 23510.5, "strength": "VERY WK", "score": 23.2}, {"ts": "15:25", "strike": 23500, "side": "PE", "metric": "Volume%", "val": 87.71, "type": "spike", "spot": 23373.45, "strength": "WEAK", "score": 47.9}, {"ts": "09:40", "strike": 23750, "side": "PE", "metric": "Volume%", "val": 87.5, "type": "spike", "spot": 23612.5, "strength": "MODERATE", "score": 63.9}, {"ts": "11:25", "strike": 23500, "side": "PE", "metric": "Volume%", "val": 87.32, "type": "spike", "spot": 23581.0, "strength": "MODERATE", "score": 64.2}, {"ts": "10:05", "strike": 23450, "side": "PE", "metric": "Volume%", "val": 86.96, "type": "spike", "spot": 23541.85, "strength": "MODERATE", "score": 70.0}, {"ts": "14:25", "strike": 23250, "side": "CE", "metric": "Volume%", "val": -86.96, "type": "drop", "spot": 23404.15, "strength": "WEAK", "score": 41.8}, {"ts": "10:20", "strike": 23400, "side": "PE", "metric": "Volume%", "val": 86.67, "type": "spike", "spot": 23555.3, "strength": "WEAK", "score": 46.3}, {"ts": "13:35", "strike": 23450, "side": "CE", "metric": "Volume%", "val": -86.24, "type": "drop", "spot": 23484.75, "strength": "WEAK", "score": 45.8}, {"ts": "11:40", "strike": 23450, "side": "PE", "metric": "Volume%", "val": -86.21, "type": "drop", "spot": 23564.0, "strength": "WEAK", "score": 37.9}, {"ts": "13:15", "strike": 23500, "side": "PE", "metric": "Volume%", "val": 86.02, "type": "spike", "spot": 23467.5, "strength": "MODERATE", "score": 53.7}, {"ts": "10:00", "strike": 23600, "side": "CE", "metric": "Volume%", "val": 85.98, "type": "spike", "spot": 23563.3, "strength": "WEAK", "score": 32.4}, {"ts": "14:10", "strike": 23400, "side": "PE", "metric": "Volume%", "val": 85.77, "type": "spike", "spot": 23428.1, "strength": "MODERATE", "score": 64.7}, {"ts": "14:45", "strike": 23250, "side": "CE", "metric": "Volume%", "val": -85.71, "type": "drop", "spot": 23417.2, "strength": "WEAK", "score": 44.7}, {"ts": "15:05", "strike": 23250, "side": "CE", "metric": "Volume%", "val": -85.71, "type": "drop", "spot": 23385.75, "strength": "WEAK", "score": 42.9}, {"ts": "10:50", "strike": 23400, "side": "PE", "metric": "Volume%", "val": -85.06, "type": "drop", "spot": 23571.15, "strength": "WEAK", "score": 30.8}, {"ts": "11:40", "strike": 23400, "side": "CE", "metric": "Volume%", "val": -84.62, "type": "drop", "spot": 23564.0, "strength": "WEAK", "score": 37.9}, {"ts": "12:30", "strike": 23650, "side": "PE", "metric": "Volume%", "val": 84.62, "type": "spike", "spot": 23518.75, "strength": "MODERATE", "score": 56.1}, {"ts": "13:35", "strike": 23450, "side": "PE", "metric": "Volume%", "val": 84.62, "type": "spike", "spot": 23484.75, "strength": "MODERATE", "score": 56.8}, {"ts": "13:20", "strike": 23550, "side": "PE", "metric": "Volume%", "val": -84.44, "type": "drop", "spot": 23475.35, "strength": "WEAK", "score": 39.5}, {"ts": "12:40", "strike": 23350, "side": "PE", "metric": "Volume%", "val": -84.13, "type": "drop", "spot": 23510.1, "strength": "MODERATE", "score": 54.2}, {"ts": "14:20", "strike": 23550, "side": "CE", "metric": "Volume%", "val": -84.11, "type": "drop", "spot": 23411.2, "strength": "VERY WK", "score": 13.4}, {"ts": "14:15", "strike": 23300, "side": "CE", "metric": "Volume%", "val": 84.09, "type": "spike", "spot": 23410.65, "strength": "MODERATE", "score": 55.0}, {"ts": "14:00", "strike": 23600, "side": "CE", "metric": "Volume%", "val": 84.0, "type": "spike", "spot": 23453.15, "strength": "VERY WK", "score": 18.4}, {"ts": "10:50", "strike": 23400, "side": "CE", "metric": "Volume%", "val": -83.67, "type": "drop", "spot": 23571.15, "strength": "MODERATE", "score": 52.6}, {"ts": "14:20", "strike": 23250, "side": "CE", "metric": "Volume%", "val": -83.33, "type": "drop", "spot": 23411.2, "strength": "WEAK", "score": 32.5}, {"ts": "14:20", "strike": 23300, "side": "CE", "metric": "Volume%", "val": -83.21, "type": "drop", "spot": 23411.2, "strength": "WEAK", "score": 32.6}, {"ts": "13:40", "strike": 23350, "side": "CE", "metric": "Volume%", "val": -81.82, "type": "drop", "spot": 23482.2, "strength": "WEAK", "score": 46.6}, {"ts": "10:50", "strike": 23700, "side": "CE", "metric": "Volume%", "val": -81.6, "type": "drop", "spot": 23571.15, "strength": "STRONG", "score": 75.8}, {"ts": "10:20", "strike": 23650, "side": "CE", "metric": "Volume%", "val": -81.43, "type": "drop", "spot": 23555.3, "strength": "WEAK", "score": 38.7}, {"ts": "11:05", "strike": 23650, "side": "CE", "metric": "Volume%", "val": 81.25, "type": "spike", "spot": 23587.25, "strength": "WEAK", "score": 44.7}, {"ts": "11:30", "strike": 23650, "side": "CE", "metric": "Volume%", "val": -80.91, "type": "drop", "spot": 23559.25, "strength": "VERY WK", "score": 6.3}, {"ts": "09:25", "strike": 23650, "side": "CE", "metric": "Volume%", "val": -80.7, "type": "drop", "spot": 23590.3, "strength": "VERY WK", "score": 0.0}, {"ts": "10:20", "strike": 23450, "side": "PE", "metric": "Volume%", "val": -80.56, "type": "drop", "spot": 23555.3, "strength": "WEAK", "score": 40.8}, {"ts": "09:55", "strike": 23750, "side": "PE", "metric": "Volume%", "val": 80.0, "type": "spike", "spot": 23578.15, "strength": "VERY WK", "score": 21.1}, {"ts": "13:55", "strike": 23400, "side": "CE", "metric": "Volume%", "val": -80.0, "type": "drop", "spot": 23459.45, "strength": "MODERATE", "score": 51.1}, {"ts": "11:50", "strike": 23550, "side": "CE", "metric": "Volume%", "val": 79.78, "type": "spike", "spot": 23559.85, "strength": "STRONG", "score": 76.6}, {"ts": "13:20", "strike": 23450, "side": "PE", "metric": "Volume%", "val": -79.77, "type": "drop", "spot": 23475.35, "strength": "WEAK", "score": 42.4}, {"ts": "12:15", "strike": 23350, "side": "PE", "metric": "Volume%", "val": -79.69, "type": "drop", "spot": 23523.0, "strength": "WEAK", "score": 37.5}, {"ts": "15:00", "strike": 23500, "side": "CE", "metric": "Volume%", "val": 79.07, "type": "spike", "spot": 23372.6, "strength": "WEAK", "score": 32.9}, {"ts": "11:10", "strike": 23450, "side": "PE", "metric": "Volume%", "val": -78.92, "type": "drop", "spot": 23609.7, "strength": "WEAK", "score": 36.8}, {"ts": "13:00", "strike": 23350, "side": "PE", "metric": "Volume%", "val": -78.5, "type": "drop", "spot": 23510.5, "strength": "MODERATE", "score": 56.1}, {"ts": "14:10", "strike": 23300, "side": "CE", "metric": "Volume%", "val": -78.33, "type": "drop", "spot": 23428.1, "strength": "WEAK", "score": 40.8}, {"ts": "11:20", "strike": 23700, "side": "PE", "metric": "Volume%", "val": 78.26, "type": "spike", "spot": 23600.0, "strength": "WEAK", "score": 46.8}, {"ts": "12:35", "strike": 23350, "side": "PE", "metric": "Volume%", "val": -78.26, "type": "drop", "spot": 23518.55, "strength": "WEAK", "score": 36.3}, {"ts": "10:50", "strike": 23450, "side": "PE", "metric": "Volume%", "val": -78.24, "type": "drop", "spot": 23571.15, "strength": "WEAK", "score": 35.3}, {"ts": "13:35", "strike": 23500, "side": "PE", "metric": "Volume%", "val": 78.16, "type": "spike", "spot": 23484.75, "strength": "MODERATE", "score": 72.9}, {"ts": "14:30", "strike": 23250, "side": "PE", "metric": "Volume%", "val": 78.12, "type": "spike", "spot": 23403.75, "strength": "MODERATE", "score": 51.6}, {"ts": "11:20", "strike": 23450, "side": "CE", "metric": "Volume%", "val": -77.78, "type": "drop", "spot": 23600.0, "strength": "WEAK", "score": 43.7}, {"ts": "11:40", "strike": 23650, "side": "PE", "metric": "Volume%", "val": 77.42, "type": "spike", "spot": 23564.0, "strength": "WEAK", "score": 39.2}, {"ts": "15:15", "strike": 23400, "side": "CE", "metric": "Volume%", "val": 77.42, "type": "spike", "spot": 23393.4, "strength": "STRONG", "score": 79.5}, {"ts": "12:45", "strike": 23500, "side": "PE", "metric": "Volume%", "val": 77.27, "type": "spike", "spot": 23516.65, "strength": "MODERATE", "score": 62.4}, {"ts": "14:05", "strike": 23450, "side": "CE", "metric": "Volume%", "val": 77.14, "type": "spike", "spot": 23439.4, "strength": "MODERATE", "score": 57.4}, {"ts": "10:35", "strike": 23650, "side": "CE", "metric": "Volume%", "val": -76.76, "type": "drop", "spot": 23524.75, "strength": "VERY WK", "score": 9.7}, {"ts": "12:30", "strike": 23600, "side": "CE", "metric": "Volume%", "val": 76.39, "type": "spike", "spot": 23518.75, "strength": "MODERATE", "score": 56.3}, {"ts": "12:55", "strike": 23400, "side": "CE", "metric": "Volume%", "val": -76.19, "type": "drop", "spot": 23522.6, "strength": "WEAK", "score": 42.9}, {"ts": "11:30", "strike": 23600, "side": "CE", "metric": "Volume%", "val": -75.76, "type": "drop", "spot": 23559.25, "strength": "VERY WK", "score": 20.8}, {"ts": "14:55", "strike": 23250, "side": "PE", "metric": "Volume%", "val": -75.56, "type": "drop", "spot": 23379.65, "strength": "MODERATE", "score": 56.1}, {"ts": "14:40", "strike": 23550, "side": "PE", "metric": "Volume%", "val": -75.23, "type": "drop", "spot": 23417.75, "strength": "MODERATE", "score": 58.9}, {"ts": "11:50", "strike": 23450, "side": "CE", "metric": "Volume%", "val": 75.0, "type": "spike", "spot": 23559.85, "strength": "MODERATE", "score": 57.1}, {"ts": "14:35", "strike": 23350, "side": "PE", "metric": "Volume%", "val": 75.0, "type": "spike", "spot": 23400.1, "strength": "MODERATE", "score": 52.9}, {"ts": "10:45", "strike": 23500, "side": "PE", "metric": "Volume%", "val": 74.67, "type": "spike", "spot": 23544.85, "strength": "MODERATE", "score": 58.4}, {"ts": "13:30", "strike": 23650, "side": "PE", "metric": "Volume%", "val": -74.29, "type": "drop", "spot": 23478.7, "strength": "VERY WK", "score": 23.4}, {"ts": "11:00", "strike": 23650, "side": "PE", "metric": "Volume%", "val": -74.13, "type": "drop", "spot": 23584.9, "strength": "MODERATE", "score": 59.7}, {"ts": "13:15", "strike": 23300, "side": "PE", "metric": "Volume%", "val": 73.86, "type": "spike", "spot": 23467.5, "strength": "MODERATE", "score": 53.0}, {"ts": "11:10", "strike": 23500, "side": "PE", "metric": "Volume%", "val": -73.74, "type": "drop", "spot": 23609.7, "strength": "WEAK", "score": 42.6}, {"ts": "15:15", "strike": 23300, "side": "CE", "metric": "Volume%", "val": 72.55, "type": "spike", "spot": 23393.4, "strength": "WEAK", "score": 43.9}, {"ts": "13:55", "strike": 23500, "side": "CE", "metric": "Volume%", "val": 72.25, "type": "spike", "spot": 23459.45, "strength": "WEAK", "score": 35.0}, {"ts": "12:25", "strike": 23650, "side": "CE", "metric": "Volume%", "val": 72.22, "type": "spike", "spot": 23516.75, "strength": "WEAK", "score": 41.8}, {"ts": "14:30", "strike": 23450, "side": "CE", "metric": "Volume%", "val": 72.22, "type": "spike", "spot": 23403.75, "strength": "WEAK", "score": 29.2}, {"ts": "10:25", "strike": 23550, "side": "CE", "metric": "Volume%", "val": -71.43, "type": "drop", "spot": 23553.75, "strength": "VERY WK", "score": 22.9}, {"ts": "11:25", "strike": 23750, "side": "PE", "metric": "Volume%", "val": -71.43, "type": "drop", "spot": 23581.0, "strength": "VERY WK", "score": 22.4}, {"ts": "12:05", "strike": 23400, "side": "CE", "metric": "Volume%", "val": 71.43, "type": "spike", "spot": 23503.7, "strength": "MODERATE", "score": 51.3}, {"ts": "15:25", "strike": 23400, "side": "CE", "metric": "Volume%", "val": 71.37, "type": "spike", "spot": 23373.45, "strength": "WEAK", "score": 29.7}, {"ts": "10:35", "strike": 23450, "side": "PE", "metric": "Volume%", "val": -71.36, "type": "drop", "spot": 23524.75, "strength": "MODERATE", "score": 60.8}, {"ts": "13:40", "strike": 23600, "side": "CE", "metric": "Volume%", "val": -71.18, "type": "drop", "spot": 23482.2, "strength": "MODERATE", "score": 55.8}, {"ts": "10:05", "strike": 23550, "side": "CE", "metric": "Volume%", "val": 70.86, "type": "spike", "spot": 23541.85, "strength": "WEAK", "score": 47.4}, {"ts": "12:55", "strike": 23550, "side": "CE", "metric": "Volume%", "val": 70.73, "type": "spike", "spot": 23522.6, "strength": "MODERATE", "score": 61.8}, {"ts": "14:20", "strike": 23550, "side": "PE", "metric": "Volume%", "val": -70.06, "type": "drop", "spot": 23411.2, "strength": "WEAK", "score": 27.1}, {"ts": "09:25", "strike": 23750, "side": "PE", "metric": "Volume%", "val": 70.0, "type": "spike", "spot": 23590.3, "strength": "WEAK", "score": 35.0}, {"ts": "11:05", "strike": 23700, "side": "CE", "metric": "Volume%", "val": 69.66, "type": "spike", "spot": 23587.25, "strength": "WEAK", "score": 45.5}, {"ts": "11:35", "strike": 23450, "side": "PE", "metric": "Volume%", "val": -69.64, "type": "drop", "spot": 23553.95, "strength": "MODERATE", "score": 54.2}, {"ts": "14:45", "strike": 23350, "side": "PE", "metric": "Volume%", "val": -69.57, "type": "drop", "spot": 23417.2, "strength": "WEAK", "score": 33.2}, {"ts": "13:00", "strike": 23650, "side": "CE", "metric": "Volume%", "val": -69.52, "type": "drop", "spot": 23510.5, "strength": "VERY WK", "score": 15.5}, {"ts": "11:10", "strike": 23700, "side": "PE", "metric": "Volume%", "val": -69.26, "type": "drop", "spot": 23609.7, "strength": "STRONG", "score": 77.4}, {"ts": "13:50", "strike": 23350, "side": "CE", "metric": "Volume%", "val": -69.23, "type": "drop", "spot": 23463.1, "strength": "WEAK", "score": 46.3}, {"ts": "14:45", "strike": 23550, "side": "PE", "metric": "Volume%", "val": -68.97, "type": "drop", "spot": 23417.2, "strength": "MODERATE", "score": 51.3}, {"ts": "13:05", "strike": 23450, "side": "CE", "metric": "Volume%", "val": -68.85, "type": "drop", "spot": 23498.55, "strength": "WEAK", "score": 42.9}, {"ts": "11:20", "strike": 23600, "side": "PE", "metric": "Volume%", "val": 68.18, "type": "spike", "spot": 23600.0, "strength": "MODERATE", "score": 59.5}, {"ts": "13:20", "strike": 23550, "side": "CE", "metric": "Volume%", "val": -68.18, "type": "drop", "spot": 23475.35, "strength": "WEAK", "score": 41.1}, {"ts": "13:05", "strike": 23400, "side": "PE", "metric": "Volume%", "val": -68.12, "type": "drop", "spot": 23498.55, "strength": "WEAK", "score": 48.7}, {"ts": "14:40", "strike": 23350, "side": "PE", "metric": "Volume%", "val": -67.95, "type": "drop", "spot": 23417.75, "strength": "WEAK", "score": 32.4}, {"ts": "09:45", "strike": 23500, "side": "CE", "metric": "Volume%", "val": -67.91, "type": "drop", "spot": 23592.1, "strength": "WEAK", "score": 44.2}, {"ts": "11:25", "strike": 23600, "side": "CE", "metric": "Volume%", "val": -67.78, "type": "drop", "spot": 23581.0, "strength": "VERY WK", "score": 15.8}, {"ts": "13:40", "strike": 23350, "side": "PE", "metric": "Volume%", "val": -67.57, "type": "drop", "spot": 23482.2, "strength": "WEAK", "score": 37.4}, {"ts": "15:25", "strike": 23300, "side": "CE", "metric": "Volume%", "val": -67.4, "type": "drop", "spot": 23373.45, "strength": "WEAK", "score": 37.6}, {"ts": "14:55", "strike": 23550, "side": "CE", "metric": "Volume%", "val": -67.39, "type": "drop", "spot": 23379.65, "strength": "VERY WK", "score": 1.6}, {"ts": "10:10", "strike": 23400, "side": "PE", "metric": "Volume%", "val": -67.3, "type": "drop", "spot": 23561.65, "strength": "MODERATE", "score": 57.9}, {"ts": "14:05", "strike": 23350, "side": "PE", "metric": "Volume%", "val": 67.24, "type": "spike", "spot": 23439.4, "strength": "MODERATE", "score": 63.7}, {"ts": "10:30", "strike": 23700, "side": "CE", "metric": "Volume%", "val": 67.0, "type": "spike", "spot": 23538.55, "strength": "VERY WK", "score": 24.7}, {"ts": "14:40", "strike": 23550, "side": "CE", "metric": "Volume%", "val": -66.98, "type": "drop", "spot": 23417.75, "strength": "STRONG", "score": 77.6}, {"ts": "10:50", "strike": 23650, "side": "PE", "metric": "Volume%", "val": -66.9, "type": "drop", "spot": 23571.15, "strength": "MODERATE", "score": 69.7}, {"ts": "14:50", "strike": 23500, "side": "CE", "metric": "Volume%", "val": -66.87, "type": "drop", "spot": 23390.95, "strength": "VERY WK", "score": 15.8}, {"ts": "13:45", "strike": 23550, "side": "CE", "metric": "Volume%", "val": 66.67, "type": "spike", "spot": 23473.25, "strength": "WEAK", "score": 25.5}, {"ts": "14:10", "strike": 23350, "side": "CE", "metric": "Volume%", "val": -66.67, "type": "drop", "spot": 23428.1, "strength": "WEAK", "score": 35.8}, {"ts": "14:30", "strike": 23550, "side": "CE", "metric": "Volume%", "val": -66.17, "type": "drop", "spot": 23403.75, "strength": "WEAK", "score": 35.5}, {"ts": "12:15", "strike": 23400, "side": "CE", "metric": "Volume%", "val": -66.0, "type": "drop", "spot": 23523.0, "strength": "WEAK", "score": 48.9}, {"ts": "15:20", "strike": 23550, "side": "CE", "metric": "Volume%", "val": 65.93, "type": "spike", "spot": 23376.9, "strength": "WEAK", "score": 27.6}, {"ts": "14:35", "strike": 23300, "side": "CE", "metric": "Volume%", "val": 65.91, "type": "spike", "spot": 23400.1, "strength": "MODERATE", "score": 62.9}, {"ts": "11:55", "strike": 23650, "side": "PE", "metric": "Volume%", "val": -65.45, "type": "drop", "spot": 23548.9, "strength": "VERY WK", "score": 24.2}, {"ts": "13:20", "strike": 23350, "side": "PE", "metric": "Volume%", "val": -65.31, "type": "drop", "spot": 23475.35, "strength": "WEAK", "score": 41.1}, {"ts": "11:45", "strike": 23500, "side": "PE", "metric": "Volume%", "val": 65.27, "type": "spike", "spot": 23540.35, "strength": "MODERATE", "score": 61.6}, {"ts": "10:10", "strike": 23450, "side": "PE", "metric": "Volume%", "val": -64.94, "type": "drop", "spot": 23561.65, "strength": "WEAK", "score": 47.9}, {"ts": "09:30", "strike": 23700, "side": "CE", "metric": "Volume%", "val": 64.81, "type": "spike", "spot": 23605.95, "strength": "WEAK", "score": 46.0}, {"ts": "14:25", "strike": 23550, "side": "PE", "metric": "Volume%", "val": -64.74, "type": "drop", "spot": 23404.15, "strength": "WEAK", "score": 30.3}, {"ts": "13:35", "strike": 23350, "side": "PE", "metric": "Volume%", "val": -64.71, "type": "drop", "spot": 23484.75, "strength": "WEAK", "score": 42.4}, {"ts": "15:15", "strike": 23300, "side": "PE", "metric": "Volume%", "val": 64.71, "type": "spike", "spot": 23393.4, "strength": "MODERATE", "score": 50.5}, {"ts": "10:00", "strike": 23650, "side": "CE", "metric": "Volume%", "val": -64.46, "type": "drop", "spot": 23563.3, "strength": "VERY WK", "score": 12.1}, {"ts": "09:35", "strike": 23750, "side": "CE", "metric": "Volume%", "val": 64.29, "type": "spike", "spot": 23587.0, "strength": "VERY WK", "score": 5.0}, {"ts": "12:10", "strike": 23400, "side": "CE", "metric": "Volume%", "val": -64.29, "type": "drop", "spot": 23504.8, "strength": "WEAK", "score": 40.5}, {"ts": "14:00", "strike": 23450, "side": "PE", "metric": "Volume%", "val": 64.15, "type": "spike", "spot": 23453.15, "strength": "MODERATE", "score": 53.7}, {"ts": "14:55", "strike": 23550, "side": "PE", "metric": "Volume%", "val": -64.0, "type": "drop", "spot": 23379.65, "strength": "VERY WK", "score": 17.1}, {"ts": "12:20", "strike": 23400, "side": "CE", "metric": "Volume%", "val": -63.64, "type": "drop", "spot": 23515.95, "strength": "WEAK", "score": 42.4}, {"ts": "13:05", "strike": 23450, "side": "PE", "metric": "Volume%", "val": -63.39, "type": "drop", "spot": 23498.55, "strength": "MODERATE", "score": 51.3}, {"ts": "11:50", "strike": 23650, "side": "CE", "metric": "Volume%", "val": -63.33, "type": "drop", "spot": 23559.85, "strength": "MODERATE", "score": 56.8}, {"ts": "12:40", "strike": 23600, "side": "PE", "metric": "Volume%", "val": 63.11, "type": "spike", "spot": 23510.1, "strength": "WEAK", "score": 34.7}, {"ts": "12:30", "strike": 23400, "side": "PE", "metric": "Volume%", "val": 62.96, "type": "spike", "spot": 23518.75, "strength": "MODERATE", "score": 52.9}, {"ts": "14:10", "strike": 23300, "side": "PE", "metric": "Volume%", "val": 62.89, "type": "spike", "spot": 23428.1, "strength": "MODERATE", "score": 53.9}, {"ts": "11:30", "strike": 23550, "side": "CE", "metric": "Volume%", "val": -62.75, "type": "drop", "spot": 23559.25, "strength": "WEAK", "score": 38.9}, {"ts": "09:50", "strike": 23700, "side": "PE", "metric": "Volume%", "val": 62.65, "type": "spike", "spot": 23579.9, "strength": "WEAK", "score": 37.1}, {"ts": "12:55", "strike": 23450, "side": "CE", "metric": "Volume%", "val": -62.5, "type": "drop", "spot": 23522.6, "strength": "WEAK", "score": 41.1}, {"ts": "13:05", "strike": 23550, "side": "CE", "metric": "Volume%", "val": -62.5, "type": "drop", "spot": 23498.55, "strength": "VERY WK", "score": 14.5}, {"ts": "15:20", "strike": 23450, "side": "PE", "metric": "Volume%", "val": 62.5, "type": "spike", "spot": 23376.9, "strength": "WEAK", "score": 36.8}, {"ts": "11:35", "strike": 23550, "side": "CE", "metric": "Volume%", "val": 62.41, "type": "spike", "spot": 23553.95, "strength": "MODERATE", "score": 51.1}, {"ts": "11:05", "strike": 23500, "side": "PE", "metric": "Volume%", "val": -62.26, "type": "drop", "spot": 23587.25, "strength": "WEAK", "score": 39.5}, {"ts": "11:40", "strike": 23500, "side": "PE", "metric": "Volume%", "val": -62.2, "type": "drop", "spot": 23564.0, "strength": "WEAK", "score": 37.9}, {"ts": "12:50", "strike": 23650, "side": "CE", "metric": "Volume%", "val": 61.9, "type": "spike", "spot": 23530.9, "strength": "STRONG", "score": 86.3}, {"ts": "13:45", "strike": 23300, "side": "CE", "metric": "Volume%", "val": -61.9, "type": "drop", "spot": 23473.25, "strength": "WEAK", "score": 42.2}, {"ts": "12:45", "strike": 23550, "side": "PE", "metric": "Volume%", "val": 61.76, "type": "spike", "spot": 23516.65, "strength": "MODERATE", "score": 54.5}, {"ts": "09:40", "strike": 23700, "side": "CE", "metric": "Volume%", "val": 61.64, "type": "spike", "spot": 23612.5, "strength": "STRONG", "score": 84.2}, {"ts": "10:45", "strike": 23650, "side": "PE", "metric": "Volume%", "val": -61.54, "type": "drop", "spot": 23544.85, "strength": "MODERATE", "score": 52.1}, {"ts": "12:00", "strike": 23450, "side": "PE", "metric": "Volume%", "val": -61.24, "type": "drop", "spot": 23494.7, "strength": "MODERATE", "score": 68.2}, {"ts": "11:15", "strike": 23750, "side": "CE", "metric": "Volume%", "val": -61.11, "type": "drop", "spot": 23602.15, "strength": "MODERATE", "score": 56.8}, {"ts": "11:45", "strike": 23650, "side": "CE", "metric": "Volume%", "val": 60.94, "type": "spike", "spot": 23540.35, "strength": "VERY WK", "score": 18.7}, {"ts": "15:25", "strike": 23450, "side": "PE", "metric": "Volume%", "val": 60.78, "type": "spike", "spot": 23373.45, "strength": "MODERATE", "score": 50.3}, {"ts": "09:45", "strike": 23450, "side": "PE", "metric": "Volume%", "val": -60.71, "type": "drop", "spot": 23592.1, "strength": "WEAK", "score": 43.9}, {"ts": "14:25", "strike": 23250, "side": "PE", "metric": "Volume%", "val": 60.71, "type": "spike", "spot": 23404.15, "strength": "MODERATE", "score": 65.9}, {"ts": "11:00", "strike": 23650, "side": "CE", "metric": "Volume%", "val": -60.49, "type": "drop", "spot": 23584.9, "strength": "MODERATE", "score": 60.8}, {"ts": "11:25", "strike": 23500, "side": "CE", "metric": "Volume%", "val": 60.47, "type": "spike", "spot": 23581.0, "strength": "WEAK", "score": 46.3}, {"ts": "14:50", "strike": 23250, "side": "PE", "metric": "Volume%", "val": -60.36, "type": "drop", "spot": 23390.95, "strength": "MODERATE", "score": 55.3}, {"ts": "15:20", "strike": 23300, "side": "CE", "metric": "Volume%", "val": 60.33, "type": "spike", "spot": 23376.9, "strength": "MODERATE", "score": 50.5}, {"ts": "13:30", "strike": 23550, "side": "PE", "metric": "Volume%", "val": -60.29, "type": "drop", "spot": 23478.7, "strength": "MODERATE", "score": 66.8}, {"ts": "11:10", "strike": 23500, "side": "CE", "metric": "Volume%", "val": -60.26, "type": "drop", "spot": 23609.7, "strength": "MODERATE", "score": 61.8}, {"ts": "13:40", "strike": 23450, "side": "PE", "metric": "Volume%", "val": -60.26, "type": "drop", "spot": 23482.2, "strength": "WEAK", "score": 42.9}, {"ts": "10:40", "strike": 23600, "side": "CE", "metric": "Volume%", "val": 60.0, "type": "spike", "spot": 23539.35, "strength": "WEAK", "score": 44.5}, {"ts": "11:15", "strike": 23600, "side": "PE", "metric": "Volume%", "val": 60.0, "type": "spike", "spot": 23602.15, "strength": "MODERATE", "score": 63.4}, {"ts": "13:55", "strike": 23300, "side": "PE", "metric": "Volume%", "val": 60.0, "type": "spike", "spot": 23459.45, "strength": "MODERATE", "score": 65.5}, {"ts": "14:00", "strike": 23300, "side": "CE", "metric": "Volume%", "val": 60.0, "type": "spike", "spot": 23453.15, "strength": "WEAK", "score": 42.9}, {"ts": "14:15", "strike": 23350, "side": "CE", "metric": "Volume%", "val": -60.0, "type": "drop", "spot": 23410.65, "strength": "WEAK", "score": 47.1}, {"ts": "14:45", "strike": 23450, "side": "CE", "metric": "Volume%", "val": 60.0, "type": "spike", "spot": 23417.2, "strength": "MODERATE", "score": 64.2}, {"ts": "10:50", "strike": 23550, "side": "CE", "metric": "Volume%", "val": -59.92, "type": "drop", "spot": 23571.15, "strength": "STRONG", "score": 89.2}, {"ts": "13:20", "strike": 23400, "side": "PE", "metric": "Volume%", "val": -59.82, "type": "drop", "spot": 23475.35, "strength": "WEAK", "score": 39.2}, {"ts": "13:50", "strike": 23450, "side": "CE", "metric": "Volume%", "val": -59.79, "type": "drop", "spot": 23463.1, "strength": "VERY WK", "score": 19.2}, {"ts": "10:55", "strike": 23550, "side": "CE", "metric": "Volume%", "val": -59.7, "type": "drop", "spot": 23595.05, "strength": "MODERATE", "score": 71.8}, {"ts": "09:45", "strike": 23700, "side": "CE", "metric": "Volume%", "val": -59.62, "type": "drop", "spot": 23592.1, "strength": "WEAK", "score": 27.9}, {"ts": "11:10", "strike": 23750, "side": "CE", "metric": "Volume%", "val": -59.57, "type": "drop", "spot": 23609.7, "strength": "STRONG", "score": 92.1}, {"ts": "10:25", "strike": 23650, "side": "PE", "metric": "Volume%", "val": 59.26, "type": "spike", "spot": 23553.75, "strength": "WEAK", "score": 41.1}, {"ts": "10:45", "strike": 23550, "side": "PE", "metric": "Volume%", "val": 59.18, "type": "spike", "spot": 23544.85, "strength": "MODERATE", "score": 56.3}, {"ts": "15:05", "strike": 23550, "side": "PE", "metric": "Volume%", "val": -59.18, "type": "drop", "spot": 23385.75, "strength": "WEAK", "score": 31.1}, {"ts": "13:25", "strike": 23450, "side": "PE", "metric": "Volume%", "val": -59.15, "type": "drop", "spot": 23473.85, "strength": "WEAK", "score": 37.1}, {"ts": "15:10", "strike": 23250, "side": "PE", "metric": "Volume%", "val": -59.09, "type": "drop", "spot": 23408.6, "strength": "WEAK", "score": 37.9}, {"ts": "09:40", "strike": 23550, "side": "PE", "metric": "Volume%", "val": 59.01, "type": "spike", "spot": 23612.5, "strength": "MODERATE", "score": 74.7}, {"ts": "14:55", "strike": 23350, "side": "CE", "metric": "Volume%", "val": -58.82, "type": "drop", "spot": 23379.65, "strength": "WEAK", "score": 46.1}, {"ts": "13:00", "strike": 23450, "side": "CE", "metric": "Volume%", "val": -58.54, "type": "drop", "spot": 23510.5, "strength": "WEAK", "score": 46.1}, {"ts": "09:55", "strike": 23500, "side": "PE", "metric": "Volume%", "val": 58.33, "type": "spike", "spot": 23578.15, "strength": "WEAK", "score": 45.3}, {"ts": "12:10", "strike": 23400, "side": "PE", "metric": "Volume%", "val": -58.31, "type": "drop", "spot": 23504.8, "strength": "WEAK", "score": 46.8}, {"ts": "10:40", "strike": 23450, "side": "PE", "metric": "Volume%", "val": -58.18, "type": "drop", "spot": 23539.35, "strength": "MODERATE", "score": 50.5}, {"ts": "15:10", "strike": 23450, "side": "CE", "metric": "Volume%", "val": 58.17, "type": "spike", "spot": 23408.6, "strength": "STRONG", "score": 93.2}, {"ts": "13:00", "strike": 23550, "side": "PE", "metric": "Volume%", "val": -57.77, "type": "drop", "spot": 23510.5, "strength": "WEAK", "score": 27.4}, {"ts": "14:20", "strike": 23500, "side": "PE", "metric": "Volume%", "val": -57.42, "type": "drop", "spot": 23411.2, "strength": "WEAK", "score": 25.3}, {"ts": "11:25", "strike": 23450, "side": "CE", "metric": "Volume%", "val": -57.14, "type": "drop", "spot": 23581.0, "strength": "WEAK", "score": 37.6}, {"ts": "11:40", "strike": 23700, "side": "PE", "metric": "Volume%", "val": -57.14, "type": "drop", "spot": 23564.0, "strength": "WEAK", "score": 36.3}, {"ts": "14:55", "strike": 23450, "side": "PE", "metric": "Volume%", "val": -56.72, "type": "drop", "spot": 23379.65, "strength": "WEAK", "score": 27.1}, {"ts": "10:35", "strike": 23500, "side": "PE", "metric": "Volume%", "val": -56.7, "type": "drop", "spot": 23524.75, "strength": "MODERATE", "score": 61.3}, {"ts": "14:20", "strike": 23300, "side": "PE", "metric": "Volume%", "val": -56.66, "type": "drop", "spot": 23411.2, "strength": "MODERATE", "score": 55.5}, {"ts": "13:20", "strike": 23400, "side": "CE", "metric": "Volume%", "val": -56.63, "type": "drop", "spot": 23475.35, "strength": "WEAK", "score": 47.6}, {"ts": "14:50", "strike": 23550, "side": "PE", "metric": "Volume%", "val": -56.58, "type": "drop", "spot": 23390.95, "strength": "VERY WK", "score": 21.6}, {"ts": "13:05", "strike": 23400, "side": "CE", "metric": "Volume%", "val": -56.52, "type": "drop", "spot": 23498.55, "strength": "WEAK", "score": 40.3}, {"ts": "11:40", "strike": 23550, "side": "CE", "metric": "Volume%", "val": -56.47, "type": "drop", "spot": 23564.0, "strength": "WEAK", "score": 48.9}, {"ts": "09:50", "strike": 23650, "side": "PE", "metric": "Volume%", "val": 56.34, "type": "spike", "spot": 23579.9, "strength": "WEAK", "score": 34.5}, {"ts": "11:00", "strike": 23600, "side": "PE", "metric": "Volume%", "val": 56.34, "type": "spike", "spot": 23584.9, "strength": "STRONG", "score": 77.4}, {"ts": "14:45", "strike": 23450, "side": "PE", "metric": "Volume%", "val": -56.25, "type": "drop", "spot": 23417.2, "strength": "MODERATE", "score": 54.5}, {"ts": "14:20", "strike": 23500, "side": "CE", "metric": "Volume%", "val": -56.04, "type": "drop", "spot": 23411.2, "strength": "VERY WK", "score": 23.2}, {"ts": "14:05", "strike": 23350, "side": "CE", "metric": "Volume%", "val": -55.56, "type": "drop", "spot": 23439.4, "strength": "WEAK", "score": 42.6}, {"ts": "13:20", "strike": 23650, "side": "CE", "metric": "Volume%", "val": -55.43, "type": "drop", "spot": 23475.35, "strength": "VERY WK", "score": 6.6}, {"ts": "14:00", "strike": 23400, "side": "CE", "metric": "Volume%", "val": -55.21, "type": "drop", "spot": 23453.15, "strength": "WEAK", "score": 44.2}, {"ts": "13:10", "strike": 23500, "side": "CE", "metric": "Volume%", "val": -55.12, "type": "drop", "spot": 23468.95, "strength": "VERY WK", "score": 22.4}, {"ts": "14:15", "strike": 23550, "side": "CE", "metric": "Volume%", "val": -55.1, "type": "drop", "spot": 23410.65, "strength": "VERY WK", "score": 18.4}, {"ts": "10:15", "strike": 23700, "side": "CE", "metric": "Volume%", "val": 55.07, "type": "spike", "spot": 23548.45, "strength": "WEAK", "score": 31.6}, {"ts": "09:45", "strike": 23650, "side": "CE", "metric": "Volume%", "val": 55.05, "type": "spike", "spot": 23592.1, "strength": "MODERATE", "score": 51.3}, {"ts": "10:05", "strike": 23600, "side": "CE", "metric": "Volume%", "val": -54.82, "type": "drop", "spot": 23541.85, "strength": "VERY WK", "score": 12.9}, {"ts": "14:20", "strike": 23450, "side": "PE", "metric": "Volume%", "val": -54.67, "type": "drop", "spot": 23411.2, "strength": "WEAK", "score": 42.4}, {"ts": "13:25", "strike": 23350, "side": "PE", "metric": "Volume%", "val": -54.65, "type": "drop", "spot": 23473.85, "strength": "WEAK", "score": 41.3}, {"ts": "14:25", "strike": 23550, "side": "CE", "metric": "Volume%", "val": -54.6, "type": "drop", "spot": 23404.15, "strength": "WEAK", "score": 26.6}, {"ts": "13:00", "strike": 23400, "side": "CE", "metric": "Volume%", "val": -54.55, "type": "drop", "spot": 23510.5, "strength": "WEAK", "score": 39.2}, {"ts": "14:40", "strike": 23250, "side": "CE", "metric": "Volume%", "val": -54.55, "type": "drop", "spot": 23417.75, "strength": "MODERATE", "score": 55.8}, {"ts": "12:40", "strike": 23500, "side": "PE", "metric": "Volume%", "val": 54.46, "type": "spike", "spot": 23510.1, "strength": "WEAK", "score": 43.7}, {"ts": "13:40", "strike": 23400, "side": "CE", "metric": "Volume%", "val": -54.29, "type": "drop", "spot": 23482.2, "strength": "WEAK", "score": 40.8}, {"ts": "11:10", "strike": 23650, "side": "PE", "metric": "Volume%", "val": -54.15, "type": "drop", "spot": 23609.7, "strength": "STRONG", "score": 81.3}, {"ts": "10:50", "strike": 23600, "side": "CE", "metric": "Volume%", "val": -54.02, "type": "drop", "spot": 23571.15, "strength": "STRONG", "score": 89.2}, {"ts": "13:55", "strike": 23300, "side": "CE", "metric": "Volume%", "val": 53.85, "type": "spike", "spot": 23459.45, "strength": "MODERATE", "score": 51.6}, {"ts": "13:30", "strike": 23350, "side": "PE", "metric": "Volume%", "val": -53.57, "type": "drop", "spot": 23478.7, "strength": "WEAK", "score": 34.7}, {"ts": "15:05", "strike": 23350, "side": "CE", "metric": "Volume%", "val": -53.57, "type": "drop", "spot": 23385.75, "strength": "MODERATE", "score": 56.8}, {"ts": "09:25", "strike": 23450, "side": "PE", "metric": "Volume%", "val": -53.39, "type": "drop", "spot": 23590.3, "strength": "WEAK", "score": 45.0}, {"ts": "12:50", "strike": 23700, "side": "PE", "metric": "Volume%", "val": 53.33, "type": "spike", "spot": 23530.9, "strength": "WEAK", "score": 35.5}, {"ts": "14:25", "strike": 23400, "side": "PE", "metric": "Volume%", "val": -53.24, "type": "drop", "spot": 23404.15, "strength": "MODERATE", "score": 60.8}, {"ts": "12:05", "strike": 23500, "side": "CE", "metric": "Volume%", "val": 53.23, "type": "spike", "spot": 23503.7, "strength": "MODERATE", "score": 55.8}, {"ts": "13:45", "strike": 23600, "side": "CE", "metric": "Volume%", "val": -53.13, "type": "drop", "spot": 23473.25, "strength": "VERY WK", "score": 17.6}, {"ts": "11:20", "strike": 23650, "side": "PE", "metric": "Volume%", "val": 53.12, "type": "spike", "spot": 23600.0, "strength": "MODERATE", "score": 60.5}, {"ts": "13:05", "strike": 23600, "side": "CE", "metric": "Volume%", "val": -53.01, "type": "drop", "spot": 23498.55, "strength": "VERY WK", "score": 15.8}, {"ts": "12:25", "strike": 23600, "side": "CE", "metric": "Volume%", "val": 52.86, "type": "spike", "spot": 23516.75, "strength": "WEAK", "score": 35.0}, {"ts": "11:00", "strike": 23600, "side": "CE", "metric": "Volume%", "val": 52.72, "type": "spike", "spot": 23584.9, "strength": "STRONG", "score": 76.3}, {"ts": "13:50", "strike": 23600, "side": "PE", "metric": "Volume%", "val": -52.72, "type": "drop", "spot": 23463.1, "strength": "WEAK", "score": 30.8}, {"ts": "14:45", "strike": 23350, "side": "CE", "metric": "Volume%", "val": -52.63, "type": "drop", "spot": 23417.2, "strength": "WEAK", "score": 42.6}, {"ts": "10:35", "strike": 23350, "side": "PE", "metric": "Volume%", "val": -52.46, "type": "drop", "spot": 23524.75, "strength": "WEAK", "score": 30.0}, {"ts": "12:55", "strike": 23500, "side": "PE", "metric": "Volume%", "val": 52.35, "type": "spike", "spot": 23522.6, "strength": "MODERATE", "score": 61.3}, {"ts": "14:55", "strike": 23350, "side": "PE", "metric": "Volume%", "val": -52.27, "type": "drop", "spot": 23379.65, "strength": "MODERATE", "score": 65.5}, {"ts": "11:05", "strike": 23500, "side": "CE", "metric": "Volume%", "val": 52.24, "type": "spike", "spot": 23587.25, "strength": "WEAK", "score": 40.0}, {"ts": "14:30", "strike": 23500, "side": "CE", "metric": "Volume%", "val": 52.19, "type": "spike", "spot": 23403.75, "strength": "WEAK", "score": 31.8}, {"ts": "15:15", "strike": 23450, "side": "PE", "metric": "Volume%", "val": 52.08, "type": "spike", "spot": 23393.4, "strength": "MODERATE", "score": 63.7}, {"ts": "11:00", "strike": 23450, "side": "PE", "metric": "Volume%", "val": -52.05, "type": "drop", "spot": 23584.9, "strength": "WEAK", "score": 37.9}, {"ts": "11:40", "strike": 23700, "side": "CE", "metric": "Volume%", "val": -52.05, "type": "drop", "spot": 23564.0, "strength": "WEAK", "score": 33.9}, {"ts": "09:55", "strike": 23700, "side": "PE", "metric": "Volume%", "val": -51.91, "type": "drop", "spot": 23578.15, "strength": "WEAK", "score": 29.2}, {"ts": "11:20", "strike": 23750, "side": "CE", "metric": "Volume%", "val": 51.85, "type": "spike", "spot": 23600.0, "strength": "MODERATE", "score": 51.1}, {"ts": "13:40", "strike": 23450, "side": "CE", "metric": "Volume%", "val": -51.72, "type": "drop", "spot": 23482.2, "strength": "WEAK", "score": 30.0}, {"ts": "09:40", "strike": 23550, "side": "CE", "metric": "Volume%", "val": 51.56, "type": "spike", "spot": 23612.5, "strength": "STRONG", "score": 75.3}, {"ts": "12:45", "strike": 23500, "side": "CE", "metric": "Volume%", "val": 51.52, "type": "spike", "spot": 23516.65, "strength": "MODERATE", "score": 62.4}, {"ts": "14:00", "strike": 23600, "side": "PE", "metric": "Volume%", "val": 51.43, "type": "spike", "spot": 23453.15, "strength": "WEAK", "score": 38.4}, {"ts": "13:40", "strike": 23550, "side": "CE", "metric": "Volume%", "val": -51.35, "type": "drop", "spot": 23482.2, "strength": "WEAK", "score": 45.5}, {"ts": "13:35", "strike": 23600, "side": "CE", "metric": "Volume%", "val": 51.32, "type": "spike", "spot": 23484.75, "strength": "STRONG", "score": 81.1}, {"ts": "14:45", "strike": 23500, "side": "PE", "metric": "Volume%", "val": -51.29, "type": "drop", "spot": 23417.2, "strength": "MODERATE", "score": 51.8}, {"ts": "14:20", "strike": 23450, "side": "CE", "metric": "Volume%", "val": -51.15, "type": "drop", "spot": 23411.2, "strength": "VERY WK", "score": 22.4}, {"ts": "13:05", "strike": 23350, "side": "PE", "metric": "Volume%", "val": -51.02, "type": "drop", "spot": 23498.55, "strength": "MODERATE", "score": 57.1}, {"ts": "09:50", "strike": 23650, "side": "CE", "metric": "Volume%", "val": -51.01, "type": "drop", "spot": 23579.9, "strength": "VERY WK", "score": 23.4}, {"ts": "13:15", "strike": 23350, "side": "PE", "metric": "Volume%", "val": -50.93, "type": "drop", "spot": 23467.5, "strength": "WEAK", "score": 48.9}, {"ts": "12:15", "strike": 23450, "side": "CE", "metric": "Volume%", "val": -50.88, "type": "drop", "spot": 23523.0, "strength": "MODERATE", "score": 64.7}, {"ts": "10:35", "strike": 23400, "side": "PE", "metric": "Volume%", "val": -50.56, "type": "drop", "spot": 23524.75, "strength": "MODERATE", "score": 57.6}, {"ts": "14:40", "strike": 23350, "side": "CE", "metric": "Volume%", "val": -50.53, "type": "drop", "spot": 23417.75, "strength": "MODERATE", "score": 60.0}, {"ts": "13:35", "strike": 23500, "side": "CE", "metric": "Volume%", "val": 50.49, "type": "spike", "spot": 23484.75, "strength": "STRONG", "score": 83.2}, {"ts": "14:50", "strike": 23500, "side": "PE", "metric": "Volume%", "val": -50.15, "type": "drop", "spot": 23390.95, "strength": "WEAK", "score": 31.8}, {"ts": "11:10", "strike": 23650, "side": "CE", "metric": "Volume%", "val": -50.07, "type": "drop", "spot": 23609.7, "strength": "STRONG", "score": 95.5}, {"ts": "09:25", "strike": 23450, "side": "CE", "metric": "Volume%", "val": 50.0, "type": "spike", "spot": 23590.3, "strength": "WEAK", "score": 43.3}, {"ts": "09:55", "strike": 23550, "side": "PE", "metric": "Volume%", "val": -50.0, "type": "drop", "spot": 23578.15, "strength": "WEAK", "score": 44.2}, {"ts": "11:45", "strike": 23400, "side": "PE", "metric": "Volume%", "val": 50.0, "type": "spike", "spot": 23540.35, "strength": "MODERATE", "score": 66.1}, {"ts": "12:40", "strike": 23650, "side": "PE", "metric": "Volume%", "val": -50.0, "type": "drop", "spot": 23510.1, "strength": "VERY WK", "score": 15.0}, {"ts": "12:45", "strike": 23450, "side": "CE", "metric": "Volume%", "val": 50.0, "type": "spike", "spot": 23516.65, "strength": "WEAK", "score": 41.6}, {"ts": "13:30", "strike": 23350, "side": "CE", "metric": "Volume%", "val": -50.0, "type": "drop", "spot": 23478.7, "strength": "MODERATE", "score": 53.4}, {"ts": "13:40", "strike": 23650, "side": "PE", "metric": "Volume%", "val": 50.0, "type": "spike", "spot": 23482.2, "strength": "WEAK", "score": 35.3}, {"ts": "14:15", "strike": 23250, "side": "CE", "metric": "Volume%", "val": -50.0, "type": "drop", "spot": 23410.65, "strength": "WEAK", "score": 30.0}, {"ts": "09:35", "strike": 23450, "side": "PE", "metric": "Delta%", "val": 13.77, "type": "spike", "spot": 23587.0, "strength": "MODERATE", "score": 59.2}, {"ts": "09:35", "strike": 23750, "side": "CE", "metric": "Delta%", "val": -12.2, "type": "drop", "spot": 23587.0, "strength": "VERY WK", "score": 5.0}, {"ts": "09:45", "strike": 23750, "side": "CE", "metric": "Delta%", "val": 10.18, "type": "spike", "spot": 23592.1, "strength": "WEAK", "score": 30.0}, {"ts": "11:00", "strike": 23450, "side": "PE", "metric": "Delta%", "val": -9.14, "type": "drop", "spot": 23584.9, "strength": "WEAK", "score": 37.9}, {"ts": "14:20", "strike": 23300, "side": "PE", "metric": "Delta%", "val": 9.06, "type": "spike", "spot": 23411.2, "strength": "MODERATE", "score": 55.5}, {"ts": "09:45", "strike": 23700, "side": "CE", "metric": "Delta%", "val": 8.92, "type": "spike", "spot": 23592.1, "strength": "WEAK", "score": 27.9}, {"ts": "09:45", "strike": 23450, "side": "PE", "metric": "Delta%", "val": -8.82, "type": "drop", "spot": 23592.1, "strength": "WEAK", "score": 43.9}, {"ts": "14:50", "strike": 23250, "side": "PE", "metric": "Delta%", "val": 8.56, "type": "spike", "spot": 23390.95, "strength": "MODERATE", "score": 55.3}, {"ts": "11:00", "strike": 23700, "side": "CE", "metric": "Delta%", "val": 8.54, "type": "spike", "spot": 23584.9, "strength": "MODERATE", "score": 67.1}, {"ts": "09:35", "strike": 23450, "side": "PE", "metric": "Gamma%", "val": 8.29, "type": "spike", "spot": 23587.0, "strength": "MODERATE", "score": 59.2}, {"ts": "12:20", "strike": 23400, "side": "PE", "metric": "Delta%", "val": 7.91, "type": "spike", "spot": 23515.95, "strength": "WEAK", "score": 37.1}, {"ts": "14:50", "strike": 23300, "side": "PE", "metric": "Delta%", "val": 7.9, "type": "spike", "spot": 23390.95, "strength": "MODERATE", "score": 58.9}, {"ts": "09:45", "strike": 23500, "side": "PE", "metric": "Delta%", "val": -7.78, "type": "drop", "spot": 23592.1, "strength": "MODERATE", "score": 57.4}, {"ts": "09:30", "strike": 23750, "side": "CE", "metric": "Delta%", "val": 7.65, "type": "spike", "spot": 23605.95, "strength": "WEAK", "score": 45.5}, {"ts": "14:20", "strike": 23350, "side": "PE", "metric": "Delta%", "val": 7.63, "type": "spike", "spot": 23411.2, "strength": "MODERATE", "score": 57.1}, {"ts": "11:00", "strike": 23500, "side": "PE", "metric": "Delta%", "val": -7.56, "type": "drop", "spot": 23584.9, "strength": "WEAK", "score": 38.2}, {"ts": "09:45", "strike": 23650, "side": "CE", "metric": "Delta%", "val": 7.37, "type": "spike", "spot": 23592.1, "strength": "MODERATE", "score": 51.3}, {"ts": "14:25", "strike": 23250, "side": "PE", "metric": "Delta%", "val": -7.34, "type": "drop", "spot": 23404.15, "strength": "MODERATE", "score": 65.9}, {"ts": "11:45", "strike": 23400, "side": "PE", "metric": "Delta%", "val": 7.33, "type": "spike", "spot": 23540.35, "strength": "MODERATE", "score": 66.1}, {"ts": "09:30", "strike": 23450, "side": "PE", "metric": "Delta%", "val": -7.29, "type": "drop", "spot": 23605.95, "strength": "WEAK", "score": 49.4}, {"ts": "09:35", "strike": 23750, "side": "PE", "metric": "Gamma%", "val": -7.24, "type": "drop", "spot": 23587.0, "strength": "WEAK", "score": 27.3}, {"ts": "14:25", "strike": 23300, "side": "PE", "metric": "Delta%", "val": -7.11, "type": "drop", "spot": 23404.15, "strength": "MODERATE", "score": 61.6}, {"ts": "11:00", "strike": 23650, "side": "CE", "metric": "Delta%", "val": 7.03, "type": "spike", "spot": 23584.9, "strength": "MODERATE", "score": 60.8}, {"ts": "09:45", "strike": 23550, "side": "PE", "metric": "Delta%", "val": -7.0, "type": "drop", "spot": 23592.1, "strength": "MODERATE", "score": 54.5}, {"ts": "14:50", "strike": 23550, "side": "CE", "metric": "Delta%", "val": -6.98, "type": "drop", "spot": 23390.95, "strength": "VERY WK", "score": 23.7}, {"ts": "11:35", "strike": 23400, "side": "PE", "metric": "Delta%", "val": -6.9, "type": "drop", "spot": 23553.95, "strength": "MODERATE", "score": 55.0}, {"ts": "14:50", "strike": 23350, "side": "PE", "metric": "Delta%", "val": 6.81, "type": "spike", "spot": 23390.95, "strength": "MODERATE", "score": 63.7}, {"ts": "12:20", "strike": 23650, "side": "CE", "metric": "Delta%", "val": -6.78, "type": "drop", "spot": 23515.95, "strength": "MODERATE", "score": 56.1}, {"ts": "14:20", "strike": 23550, "side": "CE", "metric": "Delta%", "val": -6.78, "type": "drop", "spot": 23411.2, "strength": "VERY WK", "score": 13.4}, {"ts": "14:50", "strike": 23500, "side": "CE", "metric": "Delta%", "val": -6.72, "type": "drop", "spot": 23390.95, "strength": "VERY WK", "score": 15.8}, {"ts": "09:35", "strike": 23750, "side": "CE", "metric": "Gamma%", "val": -6.66, "type": "drop", "spot": 23587.0, "strength": "VERY WK", "score": 5.0}, {"ts": "11:00", "strike": 23550, "side": "PE", "metric": "Delta%", "val": -6.55, "type": "drop", "spot": 23584.9, "strength": "MODERATE", "score": 57.4}, {"ts": "14:20", "strike": 23500, "side": "CE", "metric": "Delta%", "val": -6.48, "type": "drop", "spot": 23411.2, "strength": "VERY WK", "score": 23.2}, {"ts": "09:30", "strike": 23500, "side": "PE", "metric": "Delta%", "val": -6.47, "type": "drop", "spot": 23605.95, "strength": "WEAK", "score": 46.5}, {"ts": "09:45", "strike": 23600, "side": "CE", "metric": "Delta%", "val": 6.46, "type": "spike", "spot": 23592.1, "strength": "MODERATE", "score": 58.7}, {"ts": "14:20", "strike": 23400, "side": "PE", "metric": "Delta%", "val": 6.45, "type": "spike", "spot": 23411.2, "strength": "MODERATE", "score": 58.4}, {"ts": "09:45", "strike": 23750, "side": "PE", "metric": "Gamma%", "val": 6.44, "type": "spike", "spot": 23592.1, "strength": "WEAK", "score": 28.7}, {"ts": "14:30", "strike": 23250, "side": "PE", "metric": "Delta%", "val": -6.37, "type": "drop", "spot": 23403.75, "strength": "MODERATE", "score": 51.6}, {"ts": "09:30", "strike": 23700, "side": "CE", "metric": "Delta%", "val": 6.34, "type": "spike", "spot": 23605.95, "strength": "WEAK", "score": 46.0}, {"ts": "11:45", "strike": 23700, "side": "CE", "metric": "Delta%", "val": -6.33, "type": "drop", "spot": 23540.35, "strength": "VERY WK", "score": 14.7}, {"ts": "14:25", "strike": 23550, "side": "CE", "metric": "Delta%", "val": 6.3, "type": "spike", "spot": 23404.15, "strength": "WEAK", "score": 26.6}, {"ts": "11:00", "strike": 23600, "side": "CE", "metric": "Delta%", "val": 6.18, "type": "spike", "spot": 23584.9, "strength": "STRONG", "score": 76.3}, {"ts": "09:45", "strike": 23750, "side": "CE", "metric": "Gamma%", "val": 6.04, "type": "spike", "spot": 23592.1, "strength": "WEAK", "score": 30.0}, {"ts": "13:10", "strike": 23350, "side": "PE", "metric": "Delta%", "val": 6.03, "type": "spike", "spot": 23468.95, "strength": "MODERATE", "score": 66.1}, {"ts": "12:20", "strike": 23600, "side": "CE", "metric": "Delta%", "val": -6.02, "type": "drop", "spot": 23515.95, "strength": "WEAK", "score": 48.2}, {"ts": "09:25", "strike": 23450, "side": "PE", "metric": "Delta%", "val": 6.0, "type": "spike", "spot": 23590.3, "strength": "WEAK", "score": 45.0}, {"ts": "09:45", "strike": 23600, "side": "PE", "metric": "Delta%", "val": -6.0, "type": "drop", "spot": 23592.1, "strength": "MODERATE", "score": 62.4}, {"ts": "14:25", "strike": 23500, "side": "CE", "metric": "Delta%", "val": 5.87, "type": "spike", "spot": 23404.15, "strength": "WEAK", "score": 31.3}, {"ts": "14:25", "strike": 23350, "side": "PE", "metric": "Delta%", "val": -5.84, "type": "drop", "spot": 23404.15, "strength": "MODERATE", "score": 62.9}, {"ts": "14:20", "strike": 23250, "side": "PE", "metric": "Delta%", "val": -5.83, "type": "drop", "spot": 23411.2, "strength": "MODERATE", "score": 50.8}, {"ts": "12:20", "strike": 23500, "side": "PE", "metric": "Delta%", "val": 5.77, "type": "spike", "spot": 23515.95, "strength": "WEAK", "score": 46.8}, {"ts": "09:30", "strike": 23550, "side": "PE", "metric": "Delta%", "val": -5.7, "type": "drop", "spot": 23605.95, "strength": "MODERATE", "score": 53.0}, {"ts": "14:50", "strike": 23450, "side": "CE", "metric": "Delta%", "val": -5.64, "type": "drop", "spot": 23390.95, "strength": "WEAK", "score": 29.5}, {"ts": "11:35", "strike": 23700, "side": "CE", "metric": "Delta%", "val": 5.63, "type": "spike", "spot": 23553.95, "strength": "WEAK", "score": 32.9}, {"ts": "14:50", "strike": 23250, "side": "PE", "metric": "Gamma%", "val": 5.62, "type": "spike", "spot": 23390.95, "strength": "MODERATE", "score": 55.3}, {"ts": "09:45", "strike": 23450, "side": "PE", "metric": "Gamma%", "val": -5.57, "type": "drop", "spot": 23592.1, "strength": "WEAK", "score": 43.9}, {"ts": "11:20", "strike": 23450, "side": "PE", "metric": "Delta%", "val": 5.55, "type": "spike", "spot": 23600.0, "strength": "WEAK", "score": 41.8}, {"ts": "09:45", "strike": 23550, "side": "CE", "metric": "Delta%", "val": 5.54, "type": "spike", "spot": 23592.1, "strength": "WEAK", "score": 49.2}, {"ts": "14:30", "strike": 23550, "side": "CE", "metric": "Delta%", "val": 5.54, "type": "spike", "spot": 23403.75, "strength": "WEAK", "score": 35.5}, {"ts": "14:30", "strike": 23300, "side": "PE", "metric": "Delta%", "val": -5.54, "type": "drop", "spot": 23403.75, "strength": "MODERATE", "score": 51.6}, {"ts": "11:35", "strike": 23450, "side": "PE", "metric": "Delta%", "val": -5.53, "type": "drop", "spot": 23553.95, "strength": "MODERATE", "score": 54.2}, {"ts": "09:30", "strike": 23650, "side": "CE", "metric": "Delta%", "val": 5.5, "type": "spike", "spot": 23605.95, "strength": "WEAK", "score": 45.5}, {"ts": "11:00", "strike": 23600, "side": "PE", "metric": "Delta%", "val": -5.5, "type": "drop", "spot": 23584.9, "strength": "STRONG", "score": 77.4}, {"ts": "14:20", "strike": 23450, "side": "CE", "metric": "Delta%", "val": -5.48, "type": "drop", "spot": 23411.2, "strength": "VERY WK", "score": 22.4}, {"ts": "14:50", "strike": 23400, "side": "PE", "metric": "Delta%", "val": 5.48, "type": "spike", "spot": 23390.95, "strength": "MODERATE", "score": 57.1}, {"ts": "14:20", "strike": 23450, "side": "PE", "metric": "Delta%", "val": 5.4, "type": "spike", "spot": 23411.2, "strength": "WEAK", "score": 42.4}, {"ts": "14:50", "strike": 23550, "side": "PE", "metric": "Gamma%", "val": -5.33, "type": "drop", "spot": 23390.95, "strength": "VERY WK", "score": 21.6}, {"ts": "09:45", "strike": 23650, "side": "PE", "metric": "Delta%", "val": -5.18, "type": "drop", "spot": 23592.1, "strength": "WEAK", "score": 38.9}, {"ts": "11:45", "strike": 23650, "side": "CE", "metric": "Delta%", "val": -5.18, "type": "drop", "spot": 23540.35, "strength": "VERY WK", "score": 18.7}, {"ts": "13:15", "strike": 23300, "side": "PE", "metric": "Delta%", "val": -5.12, "type": "drop", "spot": 23467.5, "strength": "MODERATE", "score": 53.0}, {"ts": "12:20", "strike": 23550, "side": "CE", "metric": "Delta%", "val": -5.1, "type": "drop", "spot": 23515.95, "strength": "MODERATE", "score": 52.1}, {"ts": "09:35", "strike": 23750, "side": "CE", "metric": "Price%", "val": -5.1, "type": "drop", "spot": 23587.0, "strength": "VERY WK", "score": 5.0}, {"ts": "11:00", "strike": 23550, "side": "CE", "metric": "Delta%", "val": 5.08, "type": "spike", "spot": 23584.9, "strength": "MODERATE", "score": 66.1}, {"ts": "09:35", "strike": 23750, "side": "PE", "metric": "Price%", "val": 5.08, "type": "spike", "spot": 23587.0, "strength": "WEAK", "score": 27.3}, {"ts": "13:10", "strike": 23400, "side": "PE", "metric": "Delta%", "val": 5.02, "type": "spike", "spot": 23468.95, "strength": "MODERATE", "score": 66.1}, {"ts": "10:10", "strike": 23400, "side": "PE", "metric": "Delta%", "val": 5.01, "type": "spike", "spot": 23561.65, "strength": "MODERATE", "score": 57.9}, {"ts": "14:25", "strike": 23450, "side": "CE", "metric": "Delta%", "val": 5.01, "type": "spike", "spot": 23404.15, "strength": "WEAK", "score": 31.3}, {"ts": "14:20", "strike": 23550, "side": "CE", "metric": "Gamma%", "val": -4.85, "type": "drop", "spot": 23411.2, "strength": "VERY WK", "score": 13.4}, {"ts": "09:35", "strike": 23450, "side": "PE", "metric": "Price%", "val": 4.79, "type": "spike", "spot": 23587.0, "strength": "MODERATE", "score": 59.2}, {"ts": "14:20", "strike": 23300, "side": "PE", "metric": "Gamma%", "val": 4.7, "type": "spike", "spot": 23411.2, "strength": "MODERATE", "score": 55.5}, {"ts": "14:25", "strike": 23350, "side": "PE", "metric": "Price%", "val": -4.65, "type": "drop", "spot": 23404.15, "strength": "MODERATE", "score": 62.9}, {"ts": "14:25", "strike": 23550, "side": "PE", "metric": "Gamma%", "val": 4.56, "type": "spike", "spot": 23404.15, "strength": "WEAK", "score": 30.3}, {"ts": "11:00", "strike": 23450, "side": "PE", "metric": "Price%", "val": -4.53, "type": "drop", "spot": 23584.9, "strength": "WEAK", "score": 37.9}, {"ts": "11:00", "strike": 23700, "side": "CE", "metric": "Gamma%", "val": 4.46, "type": "spike", "spot": 23584.9, "strength": "MODERATE", "score": 67.1}, {"ts": "11:00", "strike": 23450, "side": "PE", "metric": "Gamma%", "val": -4.46, "type": "drop", "spot": 23584.9, "strength": "WEAK", "score": 37.9}, {"ts": "14:25", "strike": 23300, "side": "PE", "metric": "Price%", "val": -4.43, "type": "drop", "spot": 23404.15, "strength": "MODERATE", "score": 61.6}, {"ts": "09:45", "strike": 23500, "side": "PE", "metric": "Gamma%", "val": -4.37, "type": "drop", "spot": 23592.1, "strength": "MODERATE", "score": 57.4}, {"ts": "11:00", "strike": 23700, "side": "PE", "metric": "Gamma%", "val": 4.35, "type": "spike", "spot": 23584.9, "strength": "MODERATE", "score": 62.9}, {"ts": "11:35", "strike": 23700, "side": "PE", "metric": "Gamma%", "val": 4.35, "type": "spike", "spot": 23553.95, "strength": "WEAK", "score": 32.4}, {"ts": "14:50", "strike": 23550, "side": "CE", "metric": "Gamma%", "val": -4.35, "type": "drop", "spot": 23390.95, "strength": "VERY WK", "score": 23.7}, {"ts": "14:25", "strike": 23250, "side": "PE", "metric": "Gamma%", "val": -4.31, "type": "drop", "spot": 23404.15, "strength": "MODERATE", "score": 65.9}, {"ts": "14:20", "strike": 23550, "side": "PE", "metric": "Gamma%", "val": -4.27, "type": "drop", "spot": 23411.2, "strength": "WEAK", "score": 27.1}, {"ts": "09:45", "strike": 23700, "side": "CE", "metric": "Gamma%", "val": 4.22, "type": "spike", "spot": 23592.1, "strength": "WEAK", "score": 27.9}, {"ts": "09:30", "strike": 23450, "side": "PE", "metric": "Gamma%", "val": -4.21, "type": "drop", "spot": 23605.95, "strength": "WEAK", "score": 49.4}, {"ts": "14:25", "strike": 23550, "side": "CE", "metric": "Gamma%", "val": 4.16, "type": "spike", "spot": 23404.15, "strength": "WEAK", "score": 26.6}, {"ts": "09:30", "strike": 23750, "side": "PE", "metric": "Gamma%", "val": 4.13, "type": "spike", "spot": 23605.95, "strength": "WEAK", "score": 34.5}, {"ts": "14:25", "strike": 23500, "side": "PE", "metric": "Gamma%", "val": 4.1, "type": "spike", "spot": 23404.15, "strength": "WEAK", "score": 40.0}, {"ts": "11:35", "strike": 23400, "side": "PE", "metric": "Price%", "val": -4.1, "type": "drop", "spot": 23553.95, "strength": "MODERATE", "score": 55.0}, {"ts": "14:25", "strike": 23400, "side": "PE", "metric": "Price%", "val": -4.05, "type": "drop", "spot": 23404.15, "strength": "MODERATE", "score": 60.8}, {"ts": "09:30", "strike": 23750, "side": "CE", "metric": "Gamma%", "val": 4.04, "type": "spike", "spot": 23605.95, "strength": "WEAK", "score": 45.5}, {"ts": "12:20", "strike": 23400, "side": "PE", "metric": "Gamma%", "val": 4.01, "type": "spike", "spot": 23515.95, "strength": "WEAK", "score": 37.1}, {"ts": "11:35", "strike": 23500, "side": "PE", "metric": "Price%", "val": -3.96, "type": "drop", "spot": 23553.95, "strength": "MODERATE", "score": 52.9}, {"ts": "14:30", "strike": 23550, "side": "PE", "metric": "Gamma%", "val": 3.94, "type": "spike", "spot": 23403.75, "strength": "WEAK", "score": 35.8}, {"ts": "11:45", "strike": 23400, "side": "PE", "metric": "Price%", "val": 3.93, "type": "spike", "spot": 23540.35, "strength": "MODERATE", "score": 66.1}, {"ts": "12:20", "strike": 23650, "side": "CE", "metric": "Gamma%", "val": -3.91, "type": "drop", "spot": 23515.95, "strength": "MODERATE", "score": 56.1}, {"ts": "11:35", "strike": 23550, "side": "PE", "metric": "Price%", "val": -3.88, "type": "drop", "spot": 23553.95, "strength": "MODERATE", "score": 54.2}, {"ts": "11:00", "strike": 23550, "side": "PE", "metric": "Price%", "val": -3.87, "type": "drop", "spot": 23584.9, "strength": "MODERATE", "score": 57.4}, {"ts": "14:50", "strike": 23350, "side": "PE", "metric": "Price%", "val": 3.83, "type": "spike", "spot": 23390.95, "strength": "MODERATE", "score": 63.7}, {"ts": "09:25", "strike": 23450, "side": "PE", "metric": "Price%", "val": 3.75, "type": "spike", "spot": 23590.3, "strength": "WEAK", "score": 45.0}, {"ts": "11:35", "strike": 23600, "side": "PE", "metric": "Price%", "val": -3.73, "type": "drop", "spot": 23553.95, "strength": "WEAK", "score": 47.4}, {"ts": "14:25", "strike": 23500, "side": "PE", "metric": "Price%", "val": -3.72, "type": "drop", "spot": 23404.15, "strength": "WEAK", "score": 40.0}, {"ts": "14:50", "strike": 23300, "side": "PE", "metric": "Gamma%", "val": 3.71, "type": "spike", "spot": 23390.95, "strength": "MODERATE", "score": 58.9}, {"ts": "11:00", "strike": 23650, "side": "PE", "metric": "Price%", "val": -3.68, "type": "drop", "spot": 23584.9, "strength": "MODERATE", "score": 59.7}, {"ts": "14:50", "strike": 23500, "side": "PE", "metric": "Gamma%", "val": -3.67, "type": "drop", "spot": 23390.95, "strength": "WEAK", "score": 31.8}, {"ts": "14:50", "strike": 23450, "side": "PE", "metric": "Price%", "val": 3.66, "type": "spike", "spot": 23390.95, "strength": "WEAK", "score": 42.6}, {"ts": "12:20", "strike": 23500, "side": "PE", "metric": "Price%", "val": 3.63, "type": "spike", "spot": 23515.95, "strength": "WEAK", "score": 46.8}, {"ts": "12:20", "strike": 23400, "side": "CE", "metric": "Gamma%", "val": 3.59, "type": "spike", "spot": 23515.95, "strength": "WEAK", "score": 42.4}, {"ts": "09:25", "strike": 23650, "side": "PE", "metric": "Price%", "val": 3.57, "type": "spike", "spot": 23590.3, "strength": "WEAK", "score": 30.0}, {"ts": "14:20", "strike": 23300, "side": "PE", "metric": "Price%", "val": 3.53, "type": "spike", "spot": 23411.2, "strength": "MODERATE", "score": 55.5}, {"ts": "13:45", "strike": 23600, "side": "CE", "metric": "Gamma%", "val": -3.52, "type": "drop", "spot": 23473.25, "strength": "VERY WK", "score": 17.6}, {"ts": "09:45", "strike": 23750, "side": "CE", "metric": "Price%", "val": 3.52, "type": "spike", "spot": 23592.1, "strength": "WEAK", "score": 30.0}, {"ts": "11:45", "strike": 23500, "side": "PE", "metric": "Price%", "val": 3.52, "type": "spike", "spot": 23540.35, "strength": "MODERATE", "score": 61.6}, {"ts": "14:50", "strike": 23450, "side": "CE", "metric": "Price%", "val": -3.51, "type": "drop", "spot": 23390.95, "strength": "WEAK", "score": 29.5}, {"ts": "09:45", "strike": 23700, "side": "CE", "metric": "Price%", "val": 3.49, "type": "spike", "spot": 23592.1, "strength": "WEAK", "score": 27.9}, {"ts": "11:35", "strike": 23450, "side": "PE", "metric": "Price%", "val": -3.46, "type": "drop", "spot": 23553.95, "strength": "MODERATE", "score": 54.2}, {"ts": "11:45", "strike": 23600, "side": "PE", "metric": "Price%", "val": 3.44, "type": "spike", "spot": 23540.35, "strength": "WEAK", "score": 27.1}, {"ts": "09:45", "strike": 23750, "side": "PE", "metric": "Price%", "val": -3.43, "type": "drop", "spot": 23592.1, "strength": "WEAK", "score": 28.7}, {"ts": "12:20", "strike": 23600, "side": "PE", "metric": "Price%", "val": 3.43, "type": "spike", "spot": 23515.95, "strength": "WEAK", "score": 45.8}, {"ts": "11:45", "strike": 23650, "side": "PE", "metric": "Price%", "val": 3.4, "type": "spike", "spot": 23540.35, "strength": "VERY WK", "score": 18.9}, {"ts": "09:25", "strike": 23500, "side": "PE", "metric": "Price%", "val": 3.39, "type": "spike", "spot": 23590.3, "strength": "MODERATE", "score": 50.0}, {"ts": "09:30", "strike": 23550, "side": "PE", "metric": "Price%", "val": -3.39, "type": "drop", "spot": 23605.95, "strength": "MODERATE", "score": 53.0}, {"ts": "11:35", "strike": 23650, "side": "PE", "metric": "Gamma%", "val": 3.38, "type": "spike", "spot": 23553.95, "strength": "WEAK", "score": 34.2}, {"ts": "11:35", "strike": 23700, "side": "PE", "metric": "Price%", "val": -3.38, "type": "drop", "spot": 23553.95, "strength": "WEAK", "score": 32.4}, {"ts": "09:45", "strike": 23700, "side": "PE", "metric": "Gamma%", "val": 3.36, "type": "spike", "spot": 23592.1, "strength": "WEAK", "score": 34.7}, {"ts": "14:30", "strike": 23250, "side": "PE", "metric": "Gamma%", "val": -3.36, "type": "drop", "spot": 23403.75, "strength": "MODERATE", "score": 51.6}, {"ts": "11:00", "strike": 23650, "side": "CE", "metric": "Gamma%", "val": 3.35, "type": "spike", "spot": 23584.9, "strength": "MODERATE", "score": 60.8}, {"ts": "11:45", "strike": 23650, "side": "PE", "metric": "Gamma%", "val": -3.35, "type": "drop", "spot": 23540.35, "strength": "VERY WK", "score": 18.9}, {"ts": "11:00", "strike": 23500, "side": "CE", "metric": "Price%", "val": 3.35, "type": "spike", "spot": 23584.9, "strength": "WEAK", "score": 42.6}, {"ts": "11:00", "strike": 23500, "side": "PE", "metric": "Price%", "val": -3.34, "type": "drop", "spot": 23584.9, "strength": "WEAK", "score": 38.2}, {"ts": "14:20", "strike": 23400, "side": "PE", "metric": "Price%", "val": 3.34, "type": "spike", "spot": 23411.2, "strength": "MODERATE", "score": 58.4}, {"ts": "10:10", "strike": 23400, "side": "PE", "metric": "Gamma%", "val": 3.33, "type": "spike", "spot": 23561.65, "strength": "MODERATE", "score": 57.9}, {"ts": "11:00", "strike": 23500, "side": "PE", "metric": "Gamma%", "val": -3.33, "type": "drop", "spot": 23584.9, "strength": "WEAK", "score": 38.2}, {"ts": "12:20", "strike": 23400, "side": "PE", "metric": "Price%", "val": 3.31, "type": "spike", "spot": 23515.95, "strength": "WEAK", "score": 37.1}, {"ts": "14:50", "strike": 23500, "side": "CE", "metric": "Price%", "val": -3.3, "type": "drop", "spot": 23390.95, "strength": "VERY WK", "score": 15.8}, {"ts": "11:35", "strike": 23650, "side": "PE", "metric": "Price%", "val": -3.29, "type": "drop", "spot": 23553.95, "strength": "WEAK", "score": 34.2}, {"ts": "09:25", "strike": 23750, "side": "PE", "metric": "Gamma%", "val": -3.28, "type": "drop", "spot": 23590.3, "strength": "WEAK", "score": 35.0}, {"ts": "09:45", "strike": 23650, "side": "CE", "metric": "Gamma%", "val": 3.28, "type": "spike", "spot": 23592.1, "strength": "MODERATE", "score": 51.3}, {"ts": "09:45", "strike": 23550, "side": "PE", "metric": "Price%", "val": -3.27, "type": "drop", "spot": 23592.1, "strength": "MODERATE", "score": 54.5}, {"ts": "11:00", "strike": 23550, "side": "CE", "metric": "Price%", "val": 3.27, "type": "spike", "spot": 23584.9, "strength": "MODERATE", "score": 66.1}, {"ts": "11:45", "strike": 23400, "side": "PE", "metric": "Gamma%", "val": 3.26, "type": "spike", "spot": 23540.35, "strength": "MODERATE", "score": 66.1}, {"ts": "14:20", "strike": 23300, "side": "CE", "metric": "Gamma%", "val": 3.25, "type": "spike", "spot": 23411.2, "strength": "WEAK", "score": 32.6}, {"ts": "14:15", "strike": 23400, "side": "PE", "metric": "Price%", "val": 3.22, "type": "spike", "spot": 23410.65, "strength": "MODERATE", "score": 57.6}, {"ts": "14:50", "strike": 23300, "side": "PE", "metric": "Price%", "val": 3.22, "type": "spike", "spot": 23390.95, "strength": "MODERATE", "score": 58.9}, {"ts": "09:25", "strike": 23600, "side": "PE", "metric": "Price%", "val": 3.21, "type": "spike", "spot": 23590.3, "strength": "MODERATE", "score": 52.0}, {"ts": "14:50", "strike": 23500, "side": "PE", "metric": "Price%", "val": 3.18, "type": "spike", "spot": 23390.95, "strength": "WEAK", "score": 31.8}, {"ts": "13:40", "strike": 23650, "side": "PE", "metric": "Gamma%", "val": -3.15, "type": "drop", "spot": 23482.2, "strength": "WEAK", "score": 35.3}, {"ts": "09:30", "strike": 23600, "side": "PE", "metric": "Price%", "val": -3.15, "type": "drop", "spot": 23605.95, "strength": "WEAK", "score": 49.5}, {"ts": "11:20", "strike": 23450, "side": "PE", "metric": "Gamma%", "val": 3.14, "type": "spike", "spot": 23600.0, "strength": "WEAK", "score": 41.8}, {"ts": "13:10", "strike": 23350, "side": "PE", "metric": "Gamma%", "val": 3.14, "type": "spike", "spot": 23468.95, "strength": "MODERATE", "score": 66.1}, {"ts": "09:30", "strike": 23700, "side": "PE", "metric": "Price%", "val": -3.12, "type": "drop", "spot": 23605.95, "strength": "WEAK", "score": 44.0}, {"ts": "14:50", "strike": 23400, "side": "PE", "metric": "Price%", "val": 3.12, "type": "spike", "spot": 23390.95, "strength": "MODERATE", "score": 57.1}, {"ts": "09:30", "strike": 23500, "side": "PE", "metric": "Price%", "val": -3.11, "type": "drop", "spot": 23605.95, "strength": "WEAK", "score": 46.5}, {"ts": "14:20", "strike": 23350, "side": "PE", "metric": "Gamma%", "val": 3.1, "type": "spike", "spot": 23411.2, "strength": "MODERATE", "score": 57.1}, {"ts": "14:25", "strike": 23450, "side": "PE", "metric": "Price%", "val": -3.09, "type": "drop", "spot": 23404.15, "strength": "WEAK", "score": 42.1}, {"ts": "14:20", "strike": 23350, "side": "PE", "metric": "Price%", "val": 3.08, "type": "spike", "spot": 23411.2, "strength": "MODERATE", "score": 57.1}, {"ts": "11:20", "strike": 23750, "side": "CE", "metric": "Gamma%", "val": -3.07, "type": "drop", "spot": 23600.0, "strength": "MODERATE", "score": 51.1}, {"ts": "14:30", "strike": 23300, "side": "PE", "metric": "Price%", "val": -3.07, "type": "drop", "spot": 23403.75, "strength": "MODERATE", "score": 51.6}, {"ts": "11:00", "strike": 23500, "side": "CE", "metric": "Gamma%", "val": -3.06, "type": "drop", "spot": 23584.9, "strength": "WEAK", "score": 42.6}, {"ts": "09:30", "strike": 23450, "side": "PE", "metric": "Price%", "val": -3.06, "type": "drop", "spot": 23605.95, "strength": "WEAK", "score": 49.4}, {"ts": "12:15", "strike": 23350, "side": "PE", "metric": "Price%", "val": 3.06, "type": "spike", "spot": 23523.0, "strength": "WEAK", "score": 37.5}, {"ts": "11:00", "strike": 23700, "side": "CE", "metric": "Price%", "val": 3.05, "type": "spike", "spot": 23584.9, "strength": "MODERATE", "score": 67.1}, {"ts": "09:30", "strike": 23700, "side": "PE", "metric": "Gamma%", "val": 3.03, "type": "spike", "spot": 23605.95, "strength": "WEAK", "score": 44.0}, {"ts": "09:45", "strike": 23450, "side": "PE", "metric": "Price%", "val": -3.03, "type": "drop", "spot": 23592.1, "strength": "WEAK", "score": 43.9}, {"ts": "09:30", "strike": 23650, "side": "PE", "metric": "Price%", "val": -3.01, "type": "drop", "spot": 23605.95, "strength": "WEAK", "score": 45.5}, {"ts": "11:00", "strike": 23600, "side": "PE", "metric": "Price%", "val": -3.01, "type": "drop", "spot": 23584.9, "strength": "STRONG", "score": 77.4}, {"ts": "11:00", "strike": 23700, "side": "PE", "metric": "Price%", "val": -3.01, "type": "drop", "spot": 23584.9, "strength": "MODERATE", "score": 62.9}, {"ts": "09:30", "strike": 23750, "side": "CE", "metric": "Price%", "val": 3.0, "type": "spike", "spot": 23605.95, "strength": "WEAK", "score": 45.5}, {"ts": "13:40", "strike": 23650, "side": "PE", "metric": "Price%", "val": 3.0, "type": "spike", "spot": 23482.2, "strength": "WEAK", "score": 35.3}], "opp": [{"ts": "09:25", "strike": 23450, "metric": "Volume%", "ce": 50.0, "pe": -53.39, "pattern": "CE_spike_PE_drop", "spot": 23590.3}, {"ts": "09:35", "strike": 23750, "metric": "Price%", "ce": -5.1, "pe": 5.08, "pattern": "PE_spike_CE_drop", "spot": 23587.0}, {"ts": "09:45", "strike": 23550, "metric": "Delta%", "ce": 5.54, "pe": -7.0, "pattern": "CE_spike_PE_drop", "spot": 23592.1}, {"ts": "09:45", "strike": 23600, "metric": "Delta%", "ce": 6.46, "pe": -6.0, "pattern": "CE_spike_PE_drop", "spot": 23592.1}, {"ts": "09:45", "strike": 23650, "metric": "Delta%", "ce": 7.37, "pe": -5.18, "pattern": "CE_spike_PE_drop", "spot": 23592.1}, {"ts": "09:45", "strike": 23750, "metric": "Price%", "ce": 3.52, "pe": -3.43, "pattern": "CE_spike_PE_drop", "spot": 23592.1}, {"ts": "09:50", "strike": 23650, "metric": "Volume%", "ce": -51.01, "pe": 56.34, "pattern": "PE_spike_CE_drop", "spot": 23579.9}, {"ts": "11:00", "strike": 23550, "metric": "Delta%", "ce": 5.08, "pe": -6.55, "pattern": "CE_spike_PE_drop", "spot": 23584.9}, {"ts": "11:00", "strike": 23600, "metric": "Delta%", "ce": 6.18, "pe": -5.5, "pattern": "CE_spike_PE_drop", "spot": 23584.9}, {"ts": "11:00", "strike": 23500, "metric": "Price%", "ce": 3.35, "pe": -3.34, "pattern": "CE_spike_PE_drop", "spot": 23584.9}, {"ts": "11:00", "strike": 23550, "metric": "Price%", "ce": 3.27, "pe": -3.87, "pattern": "CE_spike_PE_drop", "spot": 23584.9}, {"ts": "11:00", "strike": 23700, "metric": "Price%", "ce": 3.05, "pe": -3.01, "pattern": "CE_spike_PE_drop", "spot": 23584.9}, {"ts": "11:05", "strike": 23500, "metric": "Volume%", "ce": 52.24, "pe": -62.26, "pattern": "CE_spike_PE_drop", "spot": 23587.25}, {"ts": "13:35", "strike": 23450, "metric": "Volume%", "ce": -86.24, "pe": 84.62, "pattern": "PE_spike_CE_drop", "spot": 23484.75}, {"ts": "14:05", "strike": 23350, "metric": "Volume%", "ce": -55.56, "pe": 67.24, "pattern": "PE_spike_CE_drop", "spot": 23439.4}, {"ts": "14:10", "strike": 23300, "metric": "Volume%", "ce": -78.33, "pe": 62.89, "pattern": "PE_spike_CE_drop", "spot": 23428.1}, {"ts": "14:20", "strike": 23450, "metric": "Delta%", "ce": -5.48, "pe": 5.4, "pattern": "PE_spike_CE_drop", "spot": 23411.2}, {"ts": "14:25", "strike": 23250, "metric": "Volume%", "ce": -86.96, "pe": 60.71, "pattern": "PE_spike_CE_drop", "spot": 23404.15}, {"ts": "14:45", "strike": 23450, "metric": "Volume%", "ce": 60.0, "pe": -56.25, "pattern": "CE_spike_PE_drop", "spot": 23417.2}, {"ts": "14:50", "strike": 23450, "metric": "Price%", "ce": -3.51, "pe": 3.66, "pattern": "PE_spike_CE_drop", "spot": 23390.95}, {"ts": "14:50", "strike": 23500, "metric": "Price%", "ce": -3.3, "pe": 3.18, "pattern": "PE_spike_CE_drop", "spot": 23390.95}], "summary": {"date": "2026-06-01", "spot_open": 23630.55, "spot_close": 23373.45, "spot_high": 23630.55, "spot_low": 23372.6, "total_rows": 855, "timestamps": 74, "strikes": [23200, 23250, 23300, 23350, 23400, 23450, 23500, 23550, 23600, 23650, 23700, 23750], "total_events": 462, "total_spikes": 210, "total_drops": 252, "total_confs": 21}};
+
+// ── STATE ──
+let metric   = 'D';
+let res      = '1min';
+let page     = 'charts';
+let sbView   = 'events';
+let evtActiveFilters = new Set(['spike','drop','CE','PE','Delta%','Gamma%','Price%','Volume%']);
+let oppFilter   = 'all';
+let oppMetrics  = new Set(['Delta%','Gamma%','Price%','Volume%']);
+let sbSearch    = '';
+
+const METRIC_MAP = {
+  D: { ce:'ce_d', pe:'pe_d', label:'Delta%',  thr:5,  color:'var(--ce)'  },
+  G: { ce:'ce_g', pe:'pe_g', label:'Gamma%',  thr:3,  color:'var(--spike)'},
+  P: { ce:'ce_p', pe:'pe_p', label:'Price%',  thr:3,  color:'var(--opp)' },
+  V: { ce:'ce_v', pe:'pe_v', label:'Volume%', thr:50, color:'var(--pe)'  },
+};
+
+// ── CHARTS ──
+let ceChart, peChart, bothChart;
+
+function tsData() { return res === '1min' ? DATA.ts1 : DATA.ts5; }
+
+function buildChartData(key, posColor, negColor, thr) {
+  const ts = tsData();
+  return {
+    labels: ts.map(r => r.ts),
+    data:   ts.map(r => r[key]),
+    bgs:    ts.map(r => {
+      const v = r[key];
+      if (Math.abs(v) >= thr) return v > 0 ? posColor : negColor;
+      return v > 0 ? posColor.replace(')', ',0.35)').replace('rgb','rgba') : negColor.replace(')', ',0.35)').replace('rgb','rgba');
+    })
+  };
+}
+
+const commonOpts = (yLabel) => ({
+  responsive: true,
+  maintainAspectRatio: false,
+  animation: { duration: 250 },
+  plugins: {
+    legend: { display: false },
+    tooltip: {
+      backgroundColor: '#0f1117',
+      borderColor: '#1c2030', borderWidth: 1,
+      titleColor: '#dde3f0', bodyColor: '#94a3b8',
+      callbacks: {
+        label: ctx => {
+          const v = ctx.raw;
+          return ` ${v >= 0 ? '▲' : '▼'} ${Math.abs(v).toFixed(2)}%`;
+        }
+      }
+    }
+  },
+  scales: {
+    x: {
+      grid: { color: '#1c2030' },
+      ticks: { color: '#3d4a5e', maxTicksLimit: res === '5min' ? 20 : 14, font: { size: 9 } }
+    },
+    y: {
+      grid: { color: '#1c2030' },
+      ticks: { color: '#3d4a5e', font: { size: 9 }, callback: v => v + '%' }
+    }
+  }
+});
+
+function renderCharts() {
+  const m = METRIC_MAP[metric];
+  const ts = tsData();
+  const labels = ts.map(r => r.ts);
+  const ceVals = ts.map(r => r[m.ce]);
+  const peVals = ts.map(r => r[m.pe]);
+  const thr = m.thr;
+
+  const ceColors = ceVals.map(v =>
+    Math.abs(v) >= thr ? (v >= 0 ? '#38bdf8' : '#f87171')
+                       : (v >= 0 ? 'rgba(56,189,248,0.3)' : 'rgba(248,113,113,0.3)')
+  );
+  const peColors = peVals.map(v =>
+    Math.abs(v) >= thr ? (v >= 0 ? '#f472b6' : '#f87171')
+                       : (v >= 0 ? 'rgba(244,114,182,0.3)' : 'rgba(248,113,113,0.3)')
+  );
+
+  if (ceChart) ceChart.destroy();
+  ceChart = new Chart(document.getElementById('ceChart'), {
+    type: 'bar',
+    data: { labels, datasets: [{ data: ceVals, backgroundColor: ceColors, borderRadius: 2, borderWidth: 0 }] },
+    options: commonOpts('CE')
+  });
+
+  if (peChart) peChart.destroy();
+  peChart = new Chart(document.getElementById('peChart'), {
+    type: 'bar',
+    data: { labels, datasets: [{ data: peVals, backgroundColor: peColors, borderRadius: 2, borderWidth: 0 }] },
+    options: commonOpts('PE')
+  });
+
+  if (bothChart) bothChart.destroy();
+  bothChart = new Chart(document.getElementById('bothChart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'CE', data: ceVals, borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.05)',
+          borderWidth: 1.5, pointRadius: 0, tension: 0.25, fill: false },
+        { label: 'PE', data: peVals, borderColor: '#f472b6', backgroundColor: 'rgba(244,114,182,0.05)',
+          borderWidth: 1.5, pointRadius: 0, tension: 0.25, fill: false }
+      ]
+    },
+    options: {
+      ...commonOpts('both'),
+      plugins: {
+        ...commonOpts('both').plugins,
+        legend: { display: false }
+      }
+    }
+  });
+
+  // update labels
+  document.getElementById('ce-lbl').textContent = m.label;
+  document.getElementById('pe-lbl').textContent = m.label;
+  document.getElementById('both-lbl').textContent = m.label;
+  document.getElementById('ce-thr').textContent = `thr ±${m.thr}%`;
+  document.getElementById('pe-thr').textContent = `thr ±${m.thr}%`;
+}
+
+// ── HEADER ──
+function renderHeader() {
+  const ts = tsData();
+  const last = ts[ts.length - 1];
+  if (!last) return;
+  document.getElementById('spotDisp').textContent =
+    last.spot.toLocaleString('en-IN', { minimumFractionDigits: 2 });
+  const spots = ts.map(r => r.spot).filter(Boolean);
+  const hi = Math.max(...spots), lo = Math.min(...spots);
+  document.getElementById('rangeDisp').textContent =
+    `H ${hi.toLocaleString('en-IN')} · L ${lo.toLocaleString('en-IN')}`;
+}
+
+// ── SIDEBAR ──
+function getFilteredEvents() {
+  const search = document.getElementById('sbSearch').value.toLowerCase();
+  return DATA.events.filter(e => {
+    if (!evtActiveFilters.has(e.type))   return false;
+    if (!evtActiveFilters.has(e.side))   return false;
+    if (!evtActiveFilters.has(e.metric)) return false;
+    if (search && !e.ts.includes(search) && !String(e.strike).includes(search)) return false;
+    return true;
+  });
+}
+
+function getFilteredOpp() {
+  const search = document.getElementById('sbSearch').value.toLowerCase();
+  return DATA.opp.filter(o => {
+    if (oppFilter === 'bull' && o.pattern !== 'CE_spike_PE_drop') return false;
+    if (oppFilter === 'bear' && o.pattern !== 'PE_spike_CE_drop') return false;
+    if (!oppMetrics.has(o.metric)) return false;
+    if (search && !o.ts.includes(search) && !String(o.strike).includes(search)) return false;
+    return true;
+  });
+}
+
+function renderSidebar() {
+  // stats
+  document.getElementById('stat-spikes').textContent = DATA.summary.total_spikes;
+  document.getElementById('stat-drops').textContent  = DATA.summary.total_drops;
+  document.getElementById('stat-confs').textContent  = DATA.summary.total_confs;
+
+  if (sbView === 'events') {
+    const evts = getFilteredEvents();
+    const html = evts.slice(0, 400).map(e => {
+      const cls = e.val > 0 ? 'pos' : 'neg';
+      const sign = e.val > 0 ? '+' : '';
+      return `<div class="event-row">
+        <span class="e-ts">${e.ts}</span>
+        <span class="e-stk">${e.strike}</span>
+        <span class="e-side ${e.side}">${e.side}</span>
+        <span class="e-metric">${e.metric}</span>
+        <span class="e-val ${cls}">${sign}${e.val.toFixed(1)}%</span>
+      </div>`;
+    }).join('');
+    document.getElementById('sbList').innerHTML = html;
+    document.getElementById('sbCount').textContent = `${evts.length} events`;
+  } else {
+    const opps = getFilteredOpp();
+    const html = opps.slice(0, 400).map(o => {
+      const isBull = o.pattern === 'CE_spike_PE_drop';
+      const stkColor = isBull ? 'var(--spike)' : 'var(--drop)';
+      const ceC = o.ce > 0 ? 'pos' : 'neg';
+      const peC = o.pe > 0 ? 'pos' : 'neg';
+      return `<div class="opp-row-sb">
+        <span class="e-ts">${o.ts}</span>
+        <span class="e-stk" style="color:${stkColor}">${o.strike}</span>
+        <span class="e-metric">${o.metric}</span>
+        <span class="e-ce e-val ${ceC}">${o.ce > 0 ? '+' : ''}${o.ce.toFixed(1)}</span>
+        <span class="e-pe e-val ${peC}">${o.pe > 0 ? '+' : ''}${o.pe.toFixed(1)}</span>
+      </div>`;
+    }).join('');
+    document.getElementById('sbList').innerHTML = html;
+    document.getElementById('sbCount').textContent = `${opps.length} confirmations`;
+  }
+}
+
+// ── CONTROLS ──
+function showPage(p) {
+  page = p;
+  document.getElementById('chartsArea').classList.toggle('hidden', p !== 'charts');
+  document.getElementById('shortcutsArea').classList.toggle('hidden', p !== 'shortcuts');
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(`tb-${p}`).classList.add('active');
+}
+
+function setMetric(m) {
+  metric = m;
+  document.querySelectorAll('.metric-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(`mb-${m}`).classList.add('active');
+  renderCharts();
+}
+
+function setRes(r) {
+  res = r;
+  document.querySelectorAll('.res-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(`rb-${r}`).classList.add('active');
+  renderCharts();
+  renderHeader();
+}
+
+function setSbView(v, btn) {
+  sbView = v;
+  document.querySelectorAll('.flt-btn').forEach(b => {
+    if (b.id === 'v-events' || b.id === 'v-opp') b.classList.remove('active');
+  });
+  btn.classList.add('active');
+  document.getElementById('evt-filters').style.display = v === 'events' ? 'flex' : 'none';
+  document.getElementById('opp-filters').style.display = v === 'opp'    ? 'flex' : 'none';
+  renderSidebar();
+}
+
+function toggleEvtFilter(key, btn) {
+  if (evtActiveFilters.has(key)) evtActiveFilters.delete(key);
+  else evtActiveFilters.add(key);
+  btn.classList.toggle('active', evtActiveFilters.has(key));
+  renderSidebar();
+}
+
+function setOppFilter(f, btn) {
+  oppFilter = f;
+  document.querySelectorAll('#opp-filters .flt-btn').forEach(b => {
+    if (['all','bull','bear'].some(x => b.onclick?.toString().includes(`'${x}'`))) b.classList.remove('active');
+  });
+  btn.classList.add('active');
+  renderSidebar();
+}
+
+function setOppFilterMetric(m, btn) {
+  if (oppMetrics.has(m)) oppMetrics.delete(m);
+  else oppMetrics.add(m);
+  btn.classList.toggle('active', oppMetrics.has(m));
+  renderSidebar();
+}
+
+// ── KEYBOARD ──
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  const k = e.key.toUpperCase();
+  const map = {
+    'D': () => { setMetric('D'); showPage('charts'); },
+    'G': () => { setMetric('G'); showPage('charts'); },
+    'P': () => { setMetric('P'); showPage('charts'); },
+    'V': () => { setMetric('V'); showPage('charts'); },
+    '1': () => setRes('1min'),
+    '5': () => setRes('5min'),
+    'E': () => { setSbView('events', document.getElementById('v-events')); },
+    'O': () => { setSbView('opp',    document.getElementById('v-opp'));    },
+    'S': () => {
+      evtActiveFilters = new Set(['spike','CE','PE','Delta%','Gamma%','Price%','Volume%']);
+      renderSidebar();
+    },
+    'X': () => {
+      evtActiveFilters = new Set(['drop','CE','PE','Delta%','Gamma%','Price%','Volume%']);
+      renderSidebar();
+    },
+    'C': () => {
+      evtActiveFilters = new Set(['spike','drop','CE','Delta%','Gamma%','Price%','Volume%']);
+      renderSidebar();
+    },
+    'A': () => {
+      evtActiveFilters = new Set(['spike','drop','PE','Delta%','Gamma%','Price%','Volume%']);
+      renderSidebar();
+    },
+    'B': () => {
+      oppFilter = 'bull'; setSbView('opp', document.getElementById('v-opp'));
+    },
+    'R': () => {
+      oppFilter = 'bear'; setSbView('opp', document.getElementById('v-opp'));
+    },
+  };
+  if (map[k]) { e.preventDefault(); map[k](); }
+});
+
+// ── INIT ──
+renderHeader();
+renderCharts();
+renderSidebar();
+</script>
+</body>
+</html>

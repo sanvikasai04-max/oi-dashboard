@@ -1,0 +1,173 @@
+
+
+2026- june 3(1st day)
+entry:
+12:26
+12:27 -spike double :entry
+
+12:47: weak entry for pe/ should i exit ce or not if not why?
+13:15: etnry for pe again
+13:30 : entry for pe again
+13:37 : entry for ce ,but second strong entry not there
+13:44 :gain pe strong
+13:46: ce strong
+14:19: ce strong
+14:23: ce strong
+14:51: ce strong
+15:00: strong pe and strong ce down
+as per scirpt we got etnry at 12:26 and exit at 15:00
+
+
+june3:
+
+why not etry for ce at 9:53 or 9:55
+why not etnry for pe at 10:15
+why not entry for ce at 10:23
+why not entry for pe at 11:36 and 11:37
+why entry for ce at 12:32 or 12:33 
+2hy not exit at 14:45 for ce??
+why not etnry for pe at 14:58??
+
+STRICT entry OK
+or SPIKE_OVERRIDE OK
+and no active trade blocking it
+For June 3:
+09:53 CE  -> rejected: STRICT_WAIT 0/3
+09:55 CE  -> rejected: STRICT_WAIT 0/3
+10:15 PE  -> rejected: STRICT_WAIT 0/3
+10:23 CE  -> rejected: STRICT_WAIT 0/3
+11:36 PE  -> rejected: STRICT_WAIT 0/3
+11:37 PE  -> rejected: STRICT_WAIT 0/3
+12:28 CE  -> accepted: SPIKE_OVERRIDE score=65, CONF=1/5
+12:32 CE  -> valid, but skipped because CE trade already active from 12:28
+12:33 CE  -> rejected: only 0-2 confirmations, not enough
+14:45 PE  -> no exit: opposite PE confirm was false
+14:58 PE  -> rejected: STRICT_WAIT 0/3, and CE trade still active
+15:00 PE  -> finally opposite PE confirm became valid, so CE exited
+Why 14:45 did not exit CE:
+PE snapshot at 14:45:
+ok=False
+OWN=0 OPP=0
+V80=0
+P3=0
+Why 14:58 PE did not trigger:
+STRICT_WAIT 0/3
+At 15:00, PE became valid:
+STRICT_BEAR OWN=5 OPP=5 V80=5 V150=5 P3=5 P5=4
+So the main reason is: Excel spike row is not equal to trade entry. The strict engine needs cross-strike + cross-candle confirmation, and same-side re-entries are skipped while a trade is active.
+
+
+
+C:\Users\Vidya sagar\OneDrive\Desktop\myscripts\htmldashboard\oi-dashboard\niftyoptiondata>python .\3_strength_analyser.py --monthly --month jun --year 2026
+================================================================================================================
+  MONTHLY SUMMARY - June 2026
+================================================================================================================
+  Date range: 2026-06-01 to 2026-07-07
+  CSV FILE             DATE       TRADES PROFIT   LOSS  FLAT        PNL  BEST MOVE   BAD MOVE
+----------------------------------------------------------------------------------------------------------------
+  oi_2026_06_02.csv    2026-06-01      0      0      0     0       0.00       0.00       0.00
+  oi_2026_06_02.csv    2026-06-02      2      1      1     0      96.75     244.50     -16.75
+    ENTRY TIME          EXIT TIME           SIDE   STRIKE    ENTRY     EXIT       PNL      BEST       BAD BEST TIME                 D%       G%       V%       P%  EXIT REASON
+    2026-06-02 10:23:00 2026-06-02 10:51:00 CE    23450.0   173.30   158.85    -14.45    113.45    -28.05 2026-06-02 14:22:00   55.83%   38.42%  183.33%    5.86%  Exit: opposite PE confirm STRICT_BEAR OWN=4 OPP=4 V80=1 V100=1 V150=0 V200=0 D2=4 D3=4 D4=4 D5=3 P3=4 P4=0 P5=0 P6=0 P7=0 OppD2=5 OppD4=4 OppP3=5 OppP5=0 STRIKE=23350.0 CNT=2 FIRST_UNITS=6 LAST_UNITS=8
+    2026-06-02 12:32:00 2026-06-02 15:25:00 CE    23450.0   155.70   266.90    111.20    131.05     11.30 2026-06-02 14:22:00  159.23%  133.17%  297.85%    5.92%  Exit: force exit 15:25
+
+  oi_2026_06_09.csv    2026-06-03      2      1      1     0     141.90     217.50     -73.65
+    ENTRY TIME          EXIT TIME           SIDE   STRIKE    ENTRY     EXIT       PNL      BEST       BAD BEST TIME                 D%       G%       V%       P%  EXIT REASON
+    2026-06-03 09:54:00 2026-06-03 11:32:00 PE    23150.0   146.10   145.00     -1.10     42.15    -78.30 2026-06-03 12:03:00    7.35%    1.47%  234.20%   11.40%  Exit: opposite CE confirm STRICT_BULL OWN=4 OPP=5 V80=3 V100=2 V150=0 V200=0 D2=4 D3=0 D4=0 D5=0 P3=5 P4=1 P5=0 P6=0 P7=0 OppD2=5 OppD4=0 OppP3=5 OppP5=5 STRIKE=23150.0 CNT=2 FIRST_UNITS=9 LAST_UNITS=9
+    2026-06-03 12:28:00 2026-06-03 15:00:00 CE    23300.0   186.35   329.35    143.00    175.35      4.65 2026-06-03 14:51:00    3.80%   -0.78%  356.58%    6.88%  Exit: opposite PE confirm STRICT_BEAR OWN=5 OPP=5 V80=5 V100=5 V150=5 V200=4 D2=5 D3=5 D4=5 D5=5 P3=5 P4=5 P5=4 P6=2 P7=0 OppD2=5 OppD4=1 OppP3=5 OppP5=5 STRIKE=23400.0 CNT=4 FIRST_UNITS=10 LAST_UNITS=10
+
+  oi_2026_06_09.csv    2026-06-04      3      0      3     0     -56.65      47.95     -93.25
+    ENTRY TIME          EXIT TIME           SIDE   STRIKE    ENTRY     EXIT       PNL      BEST       BAD BEST TIME                 D%       G%       V%       P%  EXIT REASON
+    2026-06-04 11:03:00 2026-06-04 12:00:00 PE    23250.0   102.65    82.30    -20.35     23.85    -44.15 2026-06-04 13:15:00    6.50%    2.52%  173.92%    8.97%  Exit: opposite CE confirm STRICT_BULL OWN=5 OPP=2 V80=4 V100=1 V150=1 V200=0 D2=5 D3=1 D4=0 D5=0 P3=5 P4=0 P5=0 P6=0 P7=0 OppD2=5 OppD4=0 OppP3=5 OppP5=0 STRIKE=23350.0 CNT=2 FIRST_UNITS=6 LAST_UNITS=7
+    2026-06-04 13:14:00 2026-06-04 14:00:00 PE    23150.0    86.35    54.70    -31.65      4.00    -42.15 2026-06-04 13:15:00   11.05%    3.23%  468.45%   17.08%  Exit: side-switch to CE at 2026-06-04 14:00:00
+    2026-06-04 14:00:00 2026-06-04 15:00:00 CE    23600.0    95.30    90.65     -4.65     20.10     -6.95 2026-06-04 15:29:00   12.55%    5.39%  263.75%   16.57%  Exit: opposite PE confirm STRICT_BEAR OWN=5 OPP=5 V80=5 V100=3 V150=2 V200=1 D2=5 D3=5 D4=5 D5=3 P3=5 P4=5 P5=2 P6=0 P7=0 OppD2=5 OppD4=5 OppP3=5 OppP5=5 STRIKE=23500.0 CNT=2 FIRST_UNITS=10 LAST_UNITS=10
+
+  oi_2026_06_09.csv    2026-06-05      5      1      4     0     -58.95     134.00    -204.80
+    ENTRY TIME          EXIT TIME           SIDE   STRIKE    ENTRY     EXIT       PNL      BEST       BAD BEST TIME                 D%       G%       V%       P%  EXIT REASON
+    2026-06-05 10:03:00 2026-06-05 10:12:00 CE    23650.0    94.95    97.05      2.10     12.95    -39.75 2026-06-05 10:10:00    9.78%    6.89%  320.64%   10.09%  Exit: opposite PE confirm STRICT_BEAR OWN=3 OPP=4 V80=0 V100=0 V150=0 V200=0 D2=5 D3=5 D4=0 D5=0 P3=4 P4=3 P5=0 P6=0 P7=0 OppD2=5 OppD4=0 OppP3=4 OppP5=0 STRIKE=23550.0 CNT=2 FIRST_UNITS=7 LAST_UNITS=7
+    2026-06-05 10:32:00 2026-06-05 11:04:00 PE    23600.0   212.55   207.75     -4.80     89.00    -29.20 2026-06-05 13:24:00    2.63%   -4.01%  275.46%    7.65%  Exit: opposite CE confirm STRICT_BULL OWN=5 OPP=4 V80=0 V100=0 V150=0 V200=0 D2=5 D3=4 D4=2 D5=0 P3=5 P4=5 P5=5 P6=4 P7=2 OppD2=4 OppD4=1 OppP3=5 OppP5=5 STRIKE=23500.0 CNT=2 FIRST_UNITS=9 LAST_UNITS=9
+    2026-06-05 11:05:00 2026-06-05 12:30:00 CE    23700.0    75.20    59.20    -16.00      6.95    -16.00 2026-06-05 11:06:00    6.34%    2.23%   74.57%    8.99%  Exit: session end
+    2026-06-05 14:12:00 2026-06-05 14:28:00 PE    23500.0   241.55   207.00    -34.55      5.25    -94.10 2026-06-05 14:20:00    1.69%   -4.44%  480.46%    6.67%  Exit: stop loss -30
+    2026-06-05 14:43:00 2026-06-05 14:49:00 CE    23500.0   117.55   111.85     -5.70     19.85    -25.75 2026-06-05 14:46:00   14.01%    1.67%  782.21%   22.38%  Exit: opposite PE confirm STRICT_BEAR OWN=5 OPP=5 V80=1 V100=1 V150=0 V200=0 D2=5 D3=5 D4=4 D5=2 P3=5 P4=5 P5=5 P6=5 P7=5 OppD2=5 OppD4=4 OppP3=5 OppP5=5 STRIKE=23450.0 CNT=2 FIRST_UNITS=10 LAST_UNITS=10
+
+  oi_2026_06_09.csv    2026-06-08      3      0      3     0     -49.85      56.65    -183.00
+    ENTRY TIME          EXIT TIME           SIDE   STRIKE    ENTRY     EXIT       PNL      BEST       BAD BEST TIME                 D%       G%       V%       P%  EXIT REASON
+    2026-06-08 09:49:00 2026-06-08 10:07:00 PE    23050.0    78.30    61.00    -17.30      0.70    -40.65 2026-06-08 09:50:00    4.84%    1.77%   36.13%    6.17%  Exit: opposite CE confirm STRICT_BULL OWN=5 OPP=5 V80=0 V100=0 V150=0 V200=0 D2=5 D3=5 D4=5 D5=4 P3=5 P4=5 P5=5 P6=5 P7=4 OppD2=5 OppD4=5 OppP3=5 OppP5=5 STRIKE=23150.0 CNT=2 FIRST_UNITS=10 LAST_UNITS=10
+    2026-06-08 10:32:00 2026-06-08 11:17:00 CE    23150.0   161.50   140.65    -20.85     34.60    -86.15 2026-06-08 12:51:00    2.62%   -1.23%   27.01%    4.56%  Exit: opposite PE confirm STRICT_BEAR OWN=5 OPP=5 V80=5 V100=5 V150=5 V200=5 D2=5 D3=5 D4=5 D5=5 P3=5 P4=5 P5=1 P6=0 P7=0 OppD2=5 OppD4=5 OppP3=5 OppP5=3 STRIKE=23250.0 CNT=4 FIRST_UNITS=10 LAST_UNITS=10
+    2026-06-08 12:11:00 2026-06-08 13:32:00 CE    23300.0    84.85    73.15    -11.70     21.35    -56.20 2026-06-08 12:51:00    4.60%    0.85%  347.50%    6.46%  Exit: opposite PE confirm STRICT_BEAR OWN=4 OPP=5 V80=1 V100=0 V150=0 V200=0 D2=4 D3=2 D4=0 D5=0 P3=5 P4=5 P5=2 P6=0 P7=0 OppD2=5 OppD4=2 OppP3=5 OppP5=5 STRIKE=23250.0 CNT=2 FIRST_UNITS=8 LAST_UNITS=9
+
+  oi_2026_06_09.csv    2026-06-09      6      2      4     0     -35.65      93.75    -122.90
+    ENTRY TIME          EXIT TIME           SIDE   STRIKE    ENTRY     EXIT       PNL      BEST       BAD BEST TIME                 D%       G%       V%       P%  EXIT REASON
+    2026-06-09 09:49:00 2026-06-09 11:28:00 PE    23000.0     7.70     8.50      0.80      4.30     -7.65 2026-06-09 10:49:00   59.16%   45.86%  219.49%   38.74%  Exit: opposite CE confirm STRICT_BULL OWN=5 OPP=5 V80=0 V100=0 V150=0 V200=0 D2=5 D3=5 D4=5 D5=5 P3=5 P4=5 P5=5 P6=4 P7=4 OppD2=5 OppD4=5 OppP3=5 OppP5=5 STRIKE=23100.0 CNT=6 FIRST_UNITS=10 LAST_UNITS=10
+    2026-06-09 11:35:00 2026-06-09 11:52:00 CE    23200.0    27.70    31.95      4.25     50.80    -10.30 2026-06-09 14:57:00   14.02%    6.26%  118.28%   11.92%  Exit: opposite PE confirm STRICT_BEAR OWN=5 OPP=5 V80=4 V100=2 V150=0 V200=0 D2=5 D3=4 D4=4 D5=4 P3=5 P4=5 P5=5 P6=5 P7=5 OppD2=5 OppD4=5 OppP3=5 OppP5=5 STRIKE=23200.0 CNT=3 FIRST_UNITS=10 LAST_UNITS=10
+    2026-06-09 12:00:00 2026-06-09 12:43:00 CE    23300.0    12.35     8.20     -4.15      1.45    -12.30 2026-06-09 12:35:00   19.24%   14.28%   -7.87%   11.76%  Exit: opposite PE confirm STRICT_BEAR OWN=5 OPP=5 V80=5 V100=5 V150=2 V200=0 D2=5 D3=5 D4=5 D5=5 P3=5 P4=5 P5=5 P6=4 P7=3 OppD2=5 OppD4=5 OppP3=5 OppP5=5 STRIKE=23200.0 CNT=4 FIRST_UNITS=10 LAST_UNITS=10
+    2026-06-09 12:50:00 2026-06-09 13:15:00 PE    23350.0   155.25   128.55    -26.70     14.90    -81.90 2026-06-09 13:56:00     nan%     nan%  309.97%    6.01%  Exit: side-switch to CE at 2026-06-09 13:15:00
+    2026-06-09 13:15:00 2026-06-09 13:56:00 CE    23350.0     3.35     0.95     -2.40     -0.35     -3.30 2026-06-09 13:16:00   78.60%   73.32%    9.52%   24.07%  Exit: opposite PE confirm STRICT_BEAR OWN=3 OPP=5 V80=5 V100=5 V150=2 V200=1 D2=3 D3=3 D4=3 D5=3 P3=5 P4=5 P5=5 P6=5 P7=5 OppD2=5 OppD4=5 OppP3=5 OppP5=5 STRIKE=23250.0 CNT=3 FIRST_UNITS=8 LAST_UNITS=8
+    2026-06-09 14:05:00 2026-06-09 15:25:00 CE    23250.0     7.50     0.05     -7.45     22.65     -7.45 2026-06-09 14:57:00   96.94%   75.41%  168.59%   29.31%  Exit: force exit 15:25
+
+  oi_2026_06_15.csv    2026-06-10      2      1      1     0     -25.00      27.90    -125.25
+    ENTRY TIME          EXIT TIME           SIDE   STRIKE    ENTRY     EXIT       PNL      BEST       BAD BEST TIME                 D%       G%       V%       P%  EXIT REASON
+    2026-06-10 13:03:00 2026-06-10 13:39:00 CE    23300.0   249.25   218.35    -30.90      7.20   -116.95 2026-06-10 13:04:00    2.28%   -2.62%  314.35%    5.01%  Exit: stop loss -30
+    2026-06-10 14:42:00 2026-06-10 15:25:00 PE    23350.0   227.50   233.40      5.90     20.70     -8.30 2026-06-10 15:14:00    2.72%   -3.01%  308.87%    7.11%  Exit: force exit 15:25
+
+  oi_2026_06_15.csv    2026-06-11      3      1      2     0      -4.75      81.80     -78.20
+    ENTRY TIME          EXIT TIME           SIDE   STRIKE    ENTRY     EXIT       PNL      BEST       BAD BEST TIME                 D%       G%       V%       P%  EXIT REASON
+    2026-06-11 11:42:00 2026-06-11 13:12:00 CE    23250.0   157.20   174.30     17.10     54.30    -56.35 2026-06-11 13:00:00    3.66%   -1.82%  300.23%    6.72%  Exit: opposite PE confirm STRICT_BEAR OWN=3 OPP=5 V80=5 V100=5 V150=5 V200=2 D2=4 D3=0 D4=0 D5=0 P3=3 P4=0 P5=0 P6=0 P7=0 OppD2=5 OppD4=1 OppP3=5 OppP5=0 STRIKE=23350.0 CNT=2 FIRST_UNITS=5 LAST_UNITS=8
+    2026-06-11 14:07:00 2026-06-11 14:28:00 PE    23100.0    97.35    84.35    -13.00     29.65    -13.00 2026-06-11 15:06:00    4.38%    0.74%  200.24%    6.39%  Exit: side-switch to CE at 2026-06-11 14:28:00
+    2026-06-11 14:28:00 2026-06-11 14:37:00 CE    23500.0    58.50    49.65     -8.85     -2.15     -8.85 2026-06-11 14:30:00   10.24%    6.95%  217.35%    9.86%  Exit: session end
+
+  oi_2026_06_15.csv    2026-06-12      2      1      1     0      -3.40      46.10     -32.05
+    ENTRY TIME          EXIT TIME           SIDE   STRIKE    ENTRY     EXIT       PNL      BEST       BAD BEST TIME                 D%       G%       V%       P%  EXIT REASON
+    2026-06-12 10:47:00 2026-06-12 13:33:00 PE    23150.0    64.05    36.65    -27.40      3.20    -27.40 2026-06-12 12:44:00    6.18%    4.06%  368.52%    5.87%  Exit: session end
+    2026-06-12 14:39:00 2026-06-12 15:25:00 CE    23700.0    88.90   112.90     24.00     42.90     -4.65 2026-06-12 15:06:00    9.36%    3.37%  278.61%   10.78%  Exit: force exit 15:25
+
+  oi_2026_06_15.csv    2026-06-15      6      3      3     0     -22.80      89.40    -109.60
+    ENTRY TIME          EXIT TIME           SIDE   STRIKE    ENTRY     EXIT       PNL      BEST       BAD BEST TIME                 D%       G%       V%       P%  EXIT REASON
+    2026-06-15 10:01:00 2026-06-15 11:02:00 CE    24100.0    43.45    51.70      8.25     22.10    -27.05 2026-06-15 10:52:00   25.26%   18.77%  137.95%    8.08%  Exit: opposite PE confirm STRICT_BEAR OWN=4 OPP=5 V80=0 V100=0 V150=0 V200=0 D2=5 D3=4 D4=4 D5=3 P3=4 P4=0 P5=0 P6=0 P7=0 OppD2=5 OppD4=4 OppP3=5 OppP5=5 STRIKE=24000.0 CNT=2 FIRST_UNITS=6 LAST_UNITS=9
+    2026-06-15 12:05:00 2026-06-15 12:35:00 PE    23900.0    77.60    84.05      6.45     43.90    -14.25 2026-06-15 15:12:00   13.39%    5.56%  334.62%    5.79%  Exit: opposite CE confirm STRICT_BULL OWN=3 OPP=5 V80=0 V100=0 V150=0 V200=0 D2=3 D3=3 D4=3 D5=2 P3=5 P4=5 P5=4 P6=0 P7=0 OppD2=5 OppD4=5 OppP3=5 OppP5=5 STRIKE=23850.0 CNT=2 FIRST_UNITS=8 LAST_UNITS=8
+    2026-06-15 13:09:00 2026-06-15 13:51:00 CE    24050.0    51.60    36.10    -15.50      6.15    -28.95 2026-06-15 13:11:00   29.70%   24.07%  150.46%    5.74%  Exit: side-switch to PE at 2026-06-15 13:51:00
+    2026-06-15 13:51:00 2026-06-15 14:48:00 PE    23700.0    29.85    17.00    -12.85      6.45    -14.20 2026-06-15 15:12:00  210.42%  187.81%  202.72%   14.81%  Exit: side-switch to CE at 2026-06-15 14:48:00
+    2026-06-15 14:48:00 2026-06-15 14:51:00 CE    24050.0    45.55    34.30    -11.25     -2.80    -22.90 2026-06-15 14:49:00  190.48%  175.47%  108.91%    7.43%  Exit: side-switch to PE at 2026-06-15 14:51:00
+    2026-06-15 14:51:00 2026-06-15 15:25:00 PE    23700.0    22.70    24.80      2.10     13.60     -2.25 2026-06-15 15:12:00     nan%     nan%  297.72%   16.11%  Exit: force exit 15:25
+
+  oi_2026_06_16.csv    2026-06-16      8      0      8     0     -50.45     163.65    -138.90
+    ENTRY TIME          EXIT TIME           SIDE   STRIKE    ENTRY     EXIT       PNL      BEST       BAD BEST TIME                 D%       G%       V%       P%  EXIT REASON
+    2026-06-16 09:41:00 2026-06-16 09:46:00 PE    23900.0    41.30    35.30     -6.00      6.40    -41.25 2026-06-16 10:10:00    5.71%    1.59%   51.73%    5.90%  Exit: opposite CE confirm STRICT_BULL OWN=5 OPP=5 V80=3 V100=2 V150=0 V200=0 D2=5 D3=4 D4=4 D5=4 P3=5 P4=5 P5=5 P6=5 P7=2 OppD2=5 OppD4=4 OppP3=5 OppP5=5 STRIKE=23900.0 CNT=2 FIRST_UNITS=8 LAST_UNITS=10
+    2026-06-16 10:20:00 2026-06-16 10:27:00 CE    23800.0   138.70   134.95     -3.75     57.30    -23.20 2026-06-16 14:54:00     nan%     nan%  154.56%    6.24%  Exit: opposite PE confirm STRICT_BEAR OWN=5 OPP=3 V80=3 V100=1 V150=0 V200=0 D2=5 D3=5 D4=5 D5=5 P3=5 P4=5 P5=5 P6=5 P7=5 OppD2=3 OppD4=3 OppP3=5 OppP5=5 STRIKE=23900.0 CNT=2 FIRST_UNITS=7 LAST_UNITS=8
+    2026-06-16 10:35:00 2026-06-16 11:04:00 CE    24150.0     4.20     2.10     -2.10      0.85     -4.15 2026-06-16 10:48:00   38.51%   29.39%  225.74%   25.37%  Exit: opposite PE confirm STRICT_BEAR OWN=3 OPP=5 V80=0 V100=0 V150=0 V200=0 D2=3 D3=2 D4=2 D5=2 P3=5 P4=3 P5=3 P6=2 P7=1 OppD2=5 OppD4=5 OppP3=5 OppP5=5 STRIKE=24050.0 CNT=2 FIRST_UNITS=8 LAST_UNITS=8
+    2026-06-16 11:19:00 2026-06-16 11:42:00 PE    23800.0     6.35     4.90     -1.45     -0.15     -6.30 2026-06-16 11:20:00   26.75%   20.05%   55.52%   17.59%  Exit: opposite CE confirm STRICT_BULL OWN=4 OPP=5 V80=4 V100=4 V150=1 V200=1 D2=4 D3=4 D4=3 D5=3 P3=5 P4=4 P5=3 P6=2 P7=1 OppD2=5 OppD4=4 OppP3=5 OppP5=4 STRIKE=23900.0 CNT=4 FIRST_UNITS=9 LAST_UNITS=9
+    2026-06-16 11:50:00 2026-06-16 12:14:00 CE    23800.0   137.95   129.00     -8.95     58.05    -22.45 2026-06-16 14:54:00     nan%     nan%  206.38%    5.23%  Exit: opposite PE confirm STRICT_BEAR OWN=5 OPP=4 V80=2 V100=1 V150=0 V200=0 D2=5 D3=5 D4=5 D5=4 P3=5 P4=5 P5=4 P6=4 P7=3 OppD2=4 OppD4=3 OppP3=5 OppP5=4 STRIKE=23900.0 CNT=3 FIRST_UNITS=8 LAST_UNITS=9
+    2026-06-16 13:22:00 2026-06-16 13:53:00 CE    23800.0   158.80   153.10     -5.70     37.20     -5.70 2026-06-16 14:54:00     nan%     nan%  196.34%    6.26%  Exit: opposite PE confirm STRICT_BEAR OWN=4 OPP=2 V80=0 V100=0 V150=0 V200=0 D2=5 D3=5 D4=5 D5=4 P3=5 P4=5 P5=5 P6=5 P7=5 OppD2=2 OppD4=2 OppP3=5 OppP5=5 STRIKE=23900.0 CNT=3 FIRST_UNITS=6 LAST_UNITS=6
+    2026-06-16 14:10:00 2026-06-16 14:43:00 CE    23850.0   142.20   120.30    -21.90      3.90    -35.25 2026-06-16 14:54:00     nan%     nan%  194.74%    8.92%  Exit: side-switch to PE at 2026-06-16 14:43:00
+    2026-06-16 14:43:00 2026-06-16 15:25:00 PE    23850.0     0.65     0.05     -0.60      0.10     -0.60 2026-06-16 14:44:00     nan%     inf%  104.34%   18.18%  Exit: force exit 15:25
+
+  oi_2026_06_23.csv    2026-06-17      0      0      0     0       0.00       0.00       0.00
+  oi_2026_06_23.csv    2026-06-18      1      1      0     0      25.35      27.70     -25.70
+    ENTRY TIME          EXIT TIME           SIDE   STRIKE    ENTRY     EXIT       PNL      BEST       BAD BEST TIME                 D%       G%       V%       P%  EXIT REASON
+    2026-06-18 13:07:00 2026-06-18 15:25:00 CE    24150.0   108.10   133.45     25.35     27.70    -25.70 2026-06-18 15:29:00    4.05%   -0.24%  207.34%    6.40%  Exit: force exit 15:25
+
+  oi_2026_06_23.csv    2026-06-19      1      1      0     0       1.35      25.75     -25.60
+    ENTRY TIME          EXIT TIME           SIDE   STRIKE    ENTRY     EXIT       PNL      BEST       BAD BEST TIME                 D%       G%       V%       P%  EXIT REASON
+    2026-06-19 14:20:00 2026-06-19 15:00:00 PE    23850.0    53.60    54.95      1.35     25.75    -25.60 2026-06-19 14:58:00   14.32%    7.56%  151.04%   18.19%  Exit: opposite CE confirm STRICT_BULL OWN=5 OPP=5 V80=5 V100=5 V150=5 V200=5 D2=5 D3=5 D4=5 D5=5 P3=5 P4=5 P5=5 P6=5 P7=5 OppD2=5 OppD4=5 OppP3=5 OppP5=5 STRIKE=23800.0 CNT=2 FIRST_UNITS=9 LAST_UNITS=10
+
+  oi_2026_06_23.csv    2026-06-22      1      0      1     0      -6.35      -1.15      -9.20
+    ENTRY TIME          EXIT TIME           SIDE   STRIKE    ENTRY     EXIT       PNL      BEST       BAD BEST TIME                 D%       G%       V%       P%  EXIT REASON
+    2026-06-22 13:40:00 2026-06-22 14:26:00 PE    24000.0    28.60    22.25     -6.35     -1.15     -9.20 2026-06-22 13:41:00    8.18%    6.37%  316.95%    7.52%  Exit: opposite CE confirm STRICT_BULL OWN=3 OPP=4 V80=5 V100=5 V150=5 V200=5 D2=3 D3=2 D4=1 D5=0 P3=5 P4=4 P5=1 P6=0 P7=0 OppD2=4 OppD4=2 OppP3=5 OppP5=3 STRIKE=24100.0 CNT=2 FIRST_UNITS=7 LAST_UNITS=7
+
+  oi_2026_06_23.csv    2026-06-23      2      2      0     0     186.05     289.15     -31.00
+    ENTRY TIME          EXIT TIME           SIDE   STRIKE    ENTRY     EXIT       PNL      BEST       BAD BEST TIME                 D%       G%       V%       P%  EXIT REASON
+    2026-06-23 10:38:00 2026-06-23 12:25:00 PE    24050.0    13.15   123.70    110.55    213.65     -6.05 2026-06-23 15:25:00   26.49%   16.61%  220.38%   20.09%  Exit: opposite CE confirm STRICT_BULL OWN=4 OPP=5 V80=2 V100=0 V150=0 V200=0 D2=5 D3=5 D4=5 D5=5 P3=5 P4=5 P5=5 P6=5 P7=5 OppD2=5 OppD4=4 OppP3=5 OppP5=5 STRIKE=23950.0 CNT=5 FIRST_UNITS=9 LAST_UNITS=9
+    2026-06-23 12:48:00 2026-06-23 15:25:00 PE    23950.0    50.40   125.90     75.50     75.50    -24.95 2026-06-23 15:25:00    9.06%    1.51%   37.02%    4.13%  Exit: force exit 15:25
+
+  oi_2026_06_30.csv    2026-06-24      1      1      0     0     162.95     169.15       7.65
+    ENTRY TIME          EXIT TIME           SIDE   STRIKE    ENTRY     EXIT       PNL      BEST       BAD BEST TIME                 D%       G%       V%       P%  EXIT REASON
+    2026-06-24 10:00:00 2026-06-24 15:25:00 CE    23500.0   404.55   567.50    162.95    169.15      7.65 2026-06-24 15:28:00     nan%     nan%  433.03%    4.55%  Exit: force exit 15:25
+
+  oi_2026_06_30.csv    2026-06-25      2      1      1     0     -21.50      27.50     -41.05
+    ENTRY TIME          EXIT TIME           SIDE   STRIKE    ENTRY     EXIT       PNL      BEST       BAD BEST TIME                 D%       G%       V%       P%  EXIT REASON
+    2026-06-25 14:10:00 2026-06-25 14:35:00 PE    24050.0    59.80    72.35     12.55     34.20     -0.40 2026-06-25 14:43:00    4.34%    1.61%  681.75%    6.22%  Exit: side-switch to CE at 2026-06-25 14:35:00
+    2026-06-25 14:35:00 2026-06-25 14:42:00 CE    23900.0   262.00   227.95    -34.05     -6.70    -40.65 2026-06-25 14:36:00    8.24%  -36.33%  363.61%    4.40%  Exit: stop loss -30
+
+----------------------------------------------------------------------------------------------------------------
+  TOTAL                               50     17     33     0     279.00    1741.30   -1303.25
+

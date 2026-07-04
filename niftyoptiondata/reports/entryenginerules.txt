@@ -1,0 +1,51 @@
+SPIKE_OVERRIDE is an early-entry shortcut.
+Normally entry needs:
+STRICT_CONFIRM_BARS = 3
+STRICT_CONFIRM_WINDOW = 5
+Meaning: at least 3 valid confirmations inside last 5 candles.
+But SPIKE_OVERRIDE says: if the current candle is extremely strong, allow entry with only 1 confirmation, as long as extra quality guards pass.
+Current rule:
+score >= STRICT_SPIKE_OVERRIDE_SCORE
+default score >= 60
+CONF >= 1
+V80 >= 4
+V150 >= 4
+P5 >= 3
+OppP5 >= 3
+D4 >= 3 OR P6 >= 2
+time >= 09:45
+Meaning of each:
+score >= 60
+Current strict snapshot composite score must be strong.
+
+CONF >= 1
+At least one valid strict snapshot exists in recent 5-candle window.
+
+V80 >= 4
+At least 4 nearby strikes have own-side volume pct >= 80%.
+
+V150 >= 4
+At least 4 nearby strikes have own-side volume pct >= 150%.
+
+P5 >= 3
+At least 3 nearby own-side strikes have price pct >= 5%.
+
+OppP5 >= 3
+At least 3 nearby opposite-side strikes have price pct <= -5%.
+
+D4 >= 3 OR P6 >= 2
+Either own delta pct >= 4% on 3 strikes, or own price pct >= 6% on 2 strikes.
+
+time >= 09:45
+Avoid blind early open spikes.
+Score calculation comes from strict_cross_snapshot():
+volume_score = V80*2 + V100*1 + V150*2 + V200*3
+delta_score  = D2*3 + D3*2 + D4*2 + D5*3
+price_score  = P3*3 + P4*2 + P5*2 + P6*2 + P7*3
+opp_score    = OppD2*2 + OppD4*2 + OppD6*2 + OppP3*2 + OppP5*2
+
+score = delta_score*0.40 + price_score*0.40 + volume_score*0.20 + opp_score
+Example:
+SPIKE_OVERRIDE score=65>=60 CONF=1/5
+V80=5>=4 V150=5>=4 P5=5>=3 OppP5=5>=3 D4=2 P6=3
+This means normal 3/5 confirmation was not ready, but the current candle was strong enough to enter early.
