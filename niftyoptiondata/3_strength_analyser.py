@@ -616,7 +616,8 @@ def find_exit_after_entry(
             # Spike entries should move away quickly. If they come back near
             # entry within the first few candles and still lack follow-through,
             # treat it as chop and exit before the stop loss gets hit.
-            near_entry = price <= entry_price + FAKE_SPIKE_RANGE_BUFFER_PTS
+            option_distance_from_entry = abs(float(price) - float(entry_price))
+            near_entry = option_distance_from_entry <= FAKE_SPIKE_RANGE_BUFFER_PTS
             within_window = (
                 fake_spike_bar_count >= FAKE_SPIKE_EXIT_MIN_BARS and
                 fake_spike_bar_count <= FAKE_SPIKE_EXIT_MAX_BARS
@@ -636,13 +637,14 @@ def find_exit_after_entry(
                     f"{FAKE_SPIKE_ENTRY_HIGH_BUFFER_PTS:g} "
                     f"bar={fake_spike_bar_count} "
                     f"SPOT={float(r.get('spot_close', r['spot'])):.2f}>={entry_high_chop_line:.2f} "
-                    f"near entry RANGE+{FAKE_SPIKE_RANGE_BUFFER_PTS:g} "
+                    f"near entry DIST={option_distance_from_entry:.2f}<=RANGE+{FAKE_SPIKE_RANGE_BUFFER_PTS:g} "
                     f"BEST<{FAKE_SPIKE_MIN_FOLLOW_PTS:g}"
                 )
 
         # Stop loss
         if pnl_now <= -stop_loss_pts:
-            return r["timestamp"], price, pnl_now, f"Exit: stop loss -{stop_loss_pts}"
+            stop_exit_price = max(float(entry_price) - stop_loss_pts, 0.0)
+            return r["timestamp"], stop_exit_price, -stop_loss_pts, f"Exit: stop loss -{stop_loss_pts}"
 
         # Check opposite side
         opp_ok, opp_score, opp_own, opp_opp_count, opp_units, opp_strike, opp_reason, _opp_extras = strict_best_snapshot(
