@@ -91,6 +91,13 @@ Monthly mode:
   python 3_strength_analyser_june27.py --console-xlsx --strict-window 5 --strict-confirm-bars 2 --strict-exit-bars 2 --exit-surge-ratio 1.5
 
   #--spike-override-score 80  -> from 1st strong candle 
+  python 3_strength_analyser.py --csv oi_2026_06_16.csv --date 2026-06-12
+
+  oi data info for 1min:
+  python .\3_strength_analyser.py --csv oi_2026_06_09.csv --date 2026-06-03 --show-oi-table --print-interval 1min
+
+  to write into console xlsx:
+  python .\3_strength_analyser.py --csv oi_2026_06_09.csv --date 2026-06-03 --show-oi-table --print-interval 1min --console-xlsx  oi_1min_output.xlsx
 
 
   
@@ -110,8 +117,8 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
 # USER CONFIG
-CSV_PATH         = "oi_2026_06_23.csv"
-ANALYSIS_DATE    = "2026-06-23"
+CSV_PATH         = "oi_2026_06_02.csv"
+ANALYSIS_DATE    = "2026-06-02"
 SIDE             = "both"          # "ce" | "pe" | "both"
 OI_DATA_MODE     = "back"          # "back" | "live"
 BACK_OI_DATA_DIR = Path(__file__).resolve().parent
@@ -200,24 +207,14 @@ _STRICT_BEST_CACHE = {}
 
 # Exit config: fixed stop, strict opposite confirmation, or force exit only.
 STOP_LOSS_PTS = 30
-
-ENTRY_CUTOFF = dtime(15, 0)   # no new entries after 3 PM
-FORCE_EXIT   = dtime(15, 25)  # force exit near market close, after late moves can mature
-
-# Fake-spike exit: if a spike-override entry does not get follow-through and
-# keeps trading back near entry, treat it as chop instead of waiting for SL.
 FAKE_SPIKE_EXIT_ENABLED = True
-FAKE_SPIKE_EXIT_BARS = 15
+FAKE_SPIKE_EXIT_MIN_BARS = 4
+FAKE_SPIKE_EXIT_MAX_BARS = 7
 FAKE_SPIKE_RANGE_BUFFER_PTS = 3.0
 FAKE_SPIKE_MIN_FOLLOW_PTS = 10.0
 
-# Own-side weakness exit: if the side we bought starts showing repeated
-# delta+price deterioration, exit before waiting for full opposite confirmation.
-OWN_WEAK_EXIT_ENABLED = True
-OWN_WEAK_EXIT_BARS = 2
-OWN_WEAK_MIN_STRIKES = 5
-OWN_WEAK_DELTA_DROP_PCT = 2.0
-OWN_WEAK_PRICE_DROP_PCT = 3.0
+ENTRY_CUTOFF = dtime(15, 0)   # no new entries after 3 PM
+FORCE_EXIT   = dtime(15, 25)  # force exit near market close, after late moves can mature
 
 # Cross-side OI buildup confirmation:
 # Bullish setup = CE buying across nearby strikes + PE selling confirmation.
@@ -526,7 +523,11 @@ def find_exit_after_entry(
          confirmation in score (growing exit strength).
        - If after the 1st opposite confirmation the next candle is STRONGER,
          exit immediately even without reaching the full bar count.
-    3. Force exit at FORCE_EXIT time.
+    3. SPIKE_OVERRIDE fake-spike chop exit:
+       - If a spike-override entry comes back near entry within
+         FAKE_SPIKE_EXIT_MIN_BARS..FAKE_SPIKE_EXIT_MAX_BARS candles and cannot
+         build FAKE_SPIKE_MIN_FOLLOW_PTS favorable move, exit early.
+    4. Force exit at FORCE_EXIT time.
     """
     cm = col_map[side]
     stop_loss_pts = STOP_LOSS_PTS
@@ -541,9 +542,11 @@ def find_exit_after_entry(
 
     opp = opposite_side(side)
     opp_confirm_history = []   # list of (ts, score, units) for opposite confirmations
-    own_weak_history = []
-    fake_spike_check = FAKE_SPIKE_EXIT_ENABLED and "SPIKE_OVERRIDE" in str(entry_reason)
-    fake_spike_inside_count = 0
+    fake_spike_exit_active = (
+        FAKE_SPIKE_EXIT_ENABLED and
+        "SPIKE_OVERRIDE" in str(entry_reason)
+    )
+    fake_spike_bar_count = 0
     fake_spike_best_move = 0.0
 
     for i, r in trade.iterrows():
@@ -555,33 +558,32 @@ def find_exit_after_entry(
             return r["timestamp"], price, pnl, f"Exit: force exit {FORCE_EXIT.strftime('%H:%M')}"
 
         pnl_now = price - entry_price
+        fake_spike_bar_count += 1
+        fake_spike_best_move = max(fake_spike_best_move, pnl_now)
+
+        if fake_spike_exit_active:
+            # Spike entries should move away quickly. If they come back near
+            # entry within the first few candles and still lack follow-through,
+            # treat it as chop and exit before the stop loss gets hit.
+            near_entry = price <= entry_price + FAKE_SPIKE_RANGE_BUFFER_PTS
+            within_window = (
+                fake_spike_bar_count >= FAKE_SPIKE_EXIT_MIN_BARS and
+                fake_spike_bar_count <= FAKE_SPIKE_EXIT_MAX_BARS
+            )
+            if (
+                within_window and
+                near_entry and
+                fake_spike_best_move < FAKE_SPIKE_MIN_FOLLOW_PTS
+            ):
+                return r["timestamp"], price, pnl_now, (
+                    f"Exit: fake spike chop bar={fake_spike_bar_count} near entry "
+                    f"BEST<{FAKE_SPIKE_MIN_FOLLOW_PTS:g} "
+                    f"RANGE+{FAKE_SPIKE_RANGE_BUFFER_PTS:g}"
+                )
 
         # Stop loss
         if pnl_now <= -stop_loss_pts:
             return r["timestamp"], price, pnl_now, f"Exit: stop loss -{stop_loss_pts}"
-
-        if fake_spike_check:
-            fake_spike_best_move = max(fake_spike_best_move, pnl_now)
-            near_entry = price <= entry_price + FAKE_SPIKE_RANGE_BUFFER_PTS
-            fake_spike_inside_count = fake_spike_inside_count + 1 if near_entry else 0
-            if (
-                fake_spike_inside_count >= FAKE_SPIKE_EXIT_BARS
-                and fake_spike_best_move < FAKE_SPIKE_MIN_FOLLOW_PTS
-            ):
-                return r["timestamp"], price, pnl_now, (
-                    f"Exit: fake spike chop {fake_spike_inside_count} bars near entry "
-                    f"BEST<{FAKE_SPIKE_MIN_FOLLOW_PTS:g} RANGE+{FAKE_SPIKE_RANGE_BUFFER_PTS:g}"
-                )
-
-        if OWN_WEAK_EXIT_ENABLED:
-            own_weak_ok, own_weak_reason = own_side_weakness_snapshot(full, r["timestamp"], strike, side)
-            if own_weak_ok:
-                own_weak_history.append({"ts": r["timestamp"], "reason": own_weak_reason})
-                if len(own_weak_history) >= OWN_WEAK_EXIT_BARS:
-                    return r["timestamp"], price, pnl_now, (
-                        f"Exit: own-side weakness {side.upper()} "
-                        f"CNT={len(own_weak_history)} {own_weak_reason}"
-                    )
 
         # Check opposite side
         opp_ok, opp_score, opp_own, opp_opp_count, opp_units, opp_strike, opp_reason, _opp_extras = strict_best_snapshot(
@@ -672,29 +674,6 @@ def compute_strike_bad_move(full, entry_ts, strike, side, entry_price, col_map):
     bad_move = low_price - float(entry_price)
 
     return round(bad_move, 2), low_row["timestamp"], round(low_price, 2)
-
-def own_side_weakness_snapshot(full, ts, strike, side):
-    nearby = full[
-        (full["timestamp"] == ts)
-    ].copy()
-
-    if nearby.empty:
-        return False, "OWN_WEAK_NO_NEARBY"
-
-    own_d = nearby[f"{side}_d_pct"]
-    own_p = nearby[f"{side}_p_pct"]
-    d_weak = _count_true(own_d <= -OWN_WEAK_DELTA_DROP_PCT)
-    p_weak = _count_true(own_p <= -OWN_WEAK_PRICE_DROP_PCT)
-    both_weak = _count_true(
-        (own_d <= -OWN_WEAK_DELTA_DROP_PCT) &
-        (own_p <= -OWN_WEAK_PRICE_DROP_PCT)
-    )
-    ok = both_weak >= OWN_WEAK_MIN_STRIKES
-    return ok, (
-        f"OWN_WEAK {side.upper()} BOTH={both_weak}>={OWN_WEAK_MIN_STRIKES} "
-        f"D_WEAK={d_weak} P_DROP={p_weak} "
-        f"D<={-OWN_WEAK_DELTA_DROP_PCT:g}% P<={-OWN_WEAK_PRICE_DROP_PCT:g}%"
-    )
 
 def strict_cross_snapshot(full, ts, strike, side):
     """
@@ -930,9 +909,9 @@ def strict_cross_entry_ok(full, ts, strike, side):
         #   [Jun-03 guards]
         #   D4>=3 OR P6>=2 – depth guard: move not already exhausted at entry
         #   ts >= STRICT_SPIKE_OVERRIDE_MIN_TIME – no spike overrides at session open
-        if STRICT_SPIKE_OVERRIDE_SCORE > 0 and len(confirmations) >= 1:
+        if STRICT_SPIKE_OVERRIDE_SCORE > 0:
             last_snap = all_snaps[-1]  # current snapshot (ts itself)
-            if last_snap["ok"] and last_snap["score"] >= STRICT_SPIKE_OVERRIDE_SCORE:
+            if last_snap["score"] >= STRICT_SPIKE_OVERRIDE_SCORE:
                 ex = last_snap.get("extras", {})
                 blocked_by = []
 
@@ -986,6 +965,42 @@ def strict_cross_entry_ok(full, ts, strike, side):
                     )
                     return True, last_snap["score"], reason
                 else:
+                    volume_only_block = (
+                        any(item.startswith(("V80=", "V150=")) for item in blocked_by) and
+                        not any(item.startswith(("P5=", "OppP5=", "DEPTH(", "EARLY_SESSION(")) for item in blocked_by)
+                    )
+                    if volume_only_block:
+                        next_candidates = [x for x in timestamps if x > ts]
+                        if next_candidates:
+                            next_ts = next_candidates[0]
+                            next_snap = strict_best_snapshot(full, next_ts, strike, side)
+                            next_ok, next_score, _, _, _, _, next_reason, next_ex = next_snap
+                            if next_ok and next_score >= STRICT_SPIKE_OVERRIDE_SCORE:
+                                next_v80_ok = next_ex.get("v80", 0) >= STRICT_SPIKE_MIN_V80
+                                next_v150_ok = next_ex.get("v150", 0) >= STRICT_SPIKE_MIN_V150
+                                next_p5_ok = next_ex.get("p5", 0) >= STRICT_SPIKE_MIN_P5
+                                next_opp_p5_ok = next_ex.get("opp_p5", 0) >= STRICT_SPIKE_MIN_OPP_P5
+                                next_d4_val = next_ex.get("d4", 0)
+                                next_p6_val = next_ex.get("p6", 0)
+                                next_depth_ok = (next_d4_val >= STRICT_SPIKE_MIN_D4) or (next_p6_val >= STRICT_SPIKE_MIN_P6)
+                                if next_v80_ok and next_v150_ok and next_p5_ok and next_opp_p5_ok and next_depth_ok:
+                                    reason = (
+                                        next_reason +
+                                        f" SPIKE_OVERRIDE_NEXT_VOL score={next_score}>={STRICT_SPIKE_OVERRIDE_SCORE} "
+                                        f"NEXT={str(next_ts)[:19]} "
+                                        f"V80={next_ex.get('v80',0)}>={STRICT_SPIKE_MIN_V80} "
+                                        f"V150={next_ex.get('v150',0)}>={STRICT_SPIKE_MIN_V150} "
+                                        f"P5={next_ex.get('p5',0)}>={STRICT_SPIKE_MIN_P5} "
+                                        f"OppP5={next_ex.get('opp_p5',0)}>={STRICT_SPIKE_MIN_OPP_P5} "
+                                        f"D4={next_d4_val} P6={next_p6_val}"
+                                    )
+                                    return True, next_score, reason
+                    if any(item.startswith(("V80=", "V150=")) for item in blocked_by):
+                        return False, last_snap["score"], (
+                            f"SPIKE_PENDING ({', '.join(blocked_by)}) "
+                            f"score={last_snap['score']} CONF={len(confirmations)}/{len(recent)} "
+                            f"WAIT=1-2"
+                        )
                     return False, 0, (
                         f"SPIKE_OVERRIDE_BLOCKED ({', '.join(blocked_by)}) "
                         f"score={last_snap['score']} CONF={len(confirmations)}/{len(recent)}"
@@ -1011,6 +1026,90 @@ def strict_cross_entry_ok(full, ts, strike, side):
         f"FIRST_SCORE={first['score']} LAST_SCORE={last['score']}"
     )
     return True, last["score"], reason
+
+def spike_override_volume_rescue(full, ts, strike, side):
+    """
+    Rescue path for SPIKE_OVERRIDE entries that are already strong on delta/price
+    but are waiting on volume confirmation.
+
+    Returns (ok, rescue_ts, rescue_score, rescue_reason).
+    """
+    timestamps = [x for x in sorted(full["timestamp"].unique()) if x >= ts]
+    window = timestamps[:3]  # current + next 2 minutes
+    if len(window) < 2:
+        return False, ts, 0, "NO_FUTURE_WINDOW"
+
+    for rescue_ts in window[1:]:
+        ok, score, own_count, opp_count, strength_units, snap_strike, reason, extras = strict_best_snapshot(
+            full, rescue_ts, strike, side
+        )
+        if not ok or score < STRICT_SPIKE_OVERRIDE_SCORE:
+            continue
+
+        # Must be genuinely volume-backed on the rescue candle.
+        v80_ok = extras.get("v80", 0) >= STRICT_SPIKE_MIN_V80
+        v150_ok = extras.get("v150", 0) >= STRICT_SPIKE_MIN_V150
+        p5_ok = extras.get("p5", 0) >= STRICT_SPIKE_MIN_P5
+        opp_p5_ok = extras.get("opp_p5", 0) >= STRICT_SPIKE_MIN_OPP_P5
+        d4_val = extras.get("d4", 0)
+        p6_val = extras.get("p6", 0)
+        depth_ok = (d4_val >= STRICT_SPIKE_MIN_D4) or (p6_val >= STRICT_SPIKE_MIN_P6)
+        if v80_ok and v150_ok and p5_ok and opp_p5_ok and depth_ok:
+            rescue_reason = (
+                reason +
+                f" SPIKE_OVERRIDE_RESCUE from={str(ts)[:19]} to={str(rescue_ts)[:19]} "
+                f"V80={extras.get('v80',0)}>={STRICT_SPIKE_MIN_V80} "
+                f"V150={extras.get('v150',0)}>={STRICT_SPIKE_MIN_V150} "
+                f"P5={extras.get('p5',0)}>={STRICT_SPIKE_MIN_P5} "
+                f"OppP5={extras.get('opp_p5',0)}>={STRICT_SPIKE_MIN_OPP_P5} "
+                f"D4={d4_val} P6={p6_val}"
+            )
+            return True, rescue_ts, score, rescue_reason
+
+    return False, ts, 0, "NO_VOLUME_RESCUE"
+
+def spike_override_pending_from_snapshot(full, ts, stk, side, vp):
+    """
+    Snapshot-level spike pending detector.
+    Used when the current timestamp is already extreme across nearby strikes,
+    but volume is still lagging and we want to wait 1-2 candles for confirmation.
+    """
+    if STRICT_SPIKE_OVERRIDE_SCORE <= 0:
+        return False
+    ok, score, _, _, _, _, reason, ex = strict_best_snapshot(full, ts, stk, side)
+    if score < STRICT_SPIKE_OVERRIDE_SCORE:
+        return False
+    # Keep this narrow: require a real snapshot spike with strong price depth
+    # and delta depth. Volume may lag for 1-2 candles.
+    if ex.get("p5", 0) < STRICT_SPIKE_MIN_P5:
+        return False
+    if not ((ex.get("d4", 0) >= STRICT_SPIKE_MIN_D4) or (ex.get("p6", 0) >= STRICT_SPIKE_MIN_P6)):
+        return False
+    # If the candle itself already has extreme support, don't delay it.
+    # We only want the "wait 1-2 candles" behavior when the row's own volume
+    # percent is still below the standard threshold.
+    if vp >= STRICT_MIN_VOLUME_PCT:
+        return False
+    return True
+
+def spike_extreme_dual_count(full, ts, strike, side, delta_min=10.0, price_min=10.0):
+    """
+    Count nearby strikes at a timestamp where both delta% and price% are extreme.
+    """
+    nearby = strict_candidate_strikes(full, ts, strike)
+    if not nearby:
+        return 0
+    d_col = f"{side}_d_pct"
+    p_col = f"{side}_p_pct"
+    count = 0
+    for candidate_strike in nearby:
+        rows = full[(full["timestamp"] == ts) & (full["strike"] == candidate_strike)]
+        if rows.empty:
+            continue
+        r = rows.iloc[0]
+        if float(r[d_col]) >= delta_min and float(r[p_col]) >= price_min:
+            count += 1
+    return count
 
 def opposite_side(side):
     return "pe" if side == "ce" else "ce"
@@ -2011,6 +2110,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     pe_strict_reject = 0
     pe_pass = 0
     top_rows = []
+    pending_spike = None
 
     for row in entry_source_rows:
         ts, stk, spot, side, score, dv, dp, gv, gp, vv, vp, pv, pp, iv = row
@@ -2030,6 +2130,81 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             full, ts, stk, side
         )
         entry_allowed = strict_entry_ok
+        entry_ts_use = ts
+        entry_reason_use = strict_entry_reason
+        pending_used = False
+
+        raw_spike_pending = spike_override_pending_from_snapshot(full, ts, stk, side, vp)
+        dual_extreme_count = spike_extreme_dual_count(full, ts, stk, side, delta_min=10.0, price_min=10.0)
+        dual_extreme_pending = dual_extreme_count >= 3
+        if dual_extreme_pending and not entry_allowed:
+            pending_spike = {
+                "ts": ts,
+                "strike": stk,
+                "side": side,
+                "reason": f"SPIKE_PENDING_DUAL d10/p10 count={dual_extreme_count}",
+            }
+        if raw_spike_pending and not entry_allowed:
+            pending_spike = {
+                "ts": ts,
+                "strike": stk,
+                "side": side,
+                "reason": f"SPIKE_PENDING_ROW score={score}",
+            }
+
+        if pending_spike is not None:
+            pending_age = (ts - pending_spike["ts"]).total_seconds() / 60.0
+            if pending_spike["side"] == side and pending_spike["strike"] == stk and 1 <= pending_age <= 2:
+                pending_snap = strict_best_snapshot(full, ts, stk, side)
+                pending_ok, pending_score, _, _, _, _, pending_reason, pending_ex = pending_snap
+                if pending_ok and pending_score >= STRICT_SPIKE_OVERRIDE_SCORE:
+                    pending_v80_ok = pending_ex.get("v80", 0) >= STRICT_SPIKE_MIN_V80
+                    pending_v150_ok = pending_ex.get("v150", 0) >= STRICT_SPIKE_MIN_V150
+                    pending_p5_ok = pending_ex.get("p5", 0) >= STRICT_SPIKE_MIN_P5
+                    pending_opp_p5_ok = pending_ex.get("opp_p5", 0) >= STRICT_SPIKE_MIN_OPP_P5
+                    pending_d4_val = pending_ex.get("d4", 0)
+                    pending_p6_val = pending_ex.get("p6", 0)
+                    pending_depth_ok = (pending_d4_val >= STRICT_SPIKE_MIN_D4) or (pending_p6_val >= STRICT_SPIKE_MIN_P6)
+                    if pending_v80_ok and pending_v150_ok and pending_p5_ok and pending_opp_p5_ok and pending_depth_ok:
+                        entry_allowed = True
+                        entry_ts_use = ts
+                        entry_reason_use = (
+                            pending_reason +
+                            f" SPIKE_OVERRIDE_PENDING from={str(pending_spike['ts'])[:19]} "
+                            f"to={str(ts)[:19]}"
+                        )
+                        strict_entry_score = pending_score
+                        pending_used = True
+                        r = full[
+                            (full["timestamp"] == ts) &
+                            (full["strike"] == stk)
+                        ].iloc[0]
+                        pending_spike = None
+
+        if not entry_allowed and (strict_entry_reason.startswith("SPIKE_OVERRIDE_BLOCKED") or strict_entry_reason.startswith("SPIKE_PENDING") or raw_spike_pending or dual_extreme_pending):
+            if raw_spike_pending or dual_extreme_pending or "V80=" in strict_entry_reason or "V150=" in strict_entry_reason:
+                pending_spike = {
+                    "ts": ts,
+                    "strike": stk,
+                    "side": side,
+                    "reason": strict_entry_reason if strict_entry_reason else f"SPIKE_PENDING_ROW score={score}",
+                }
+            else:
+                pending_spike = None
+        elif entry_allowed and not pending_used:
+            pending_spike = None
+
+        if not entry_allowed and strict_entry_reason.startswith("SPIKE_OVERRIDE_BLOCKED"):
+            rescue_ok, rescue_ts, rescue_score, rescue_reason = spike_override_volume_rescue(full, ts, stk, side)
+            if rescue_ok:
+                entry_allowed = True
+                entry_ts_use = rescue_ts
+                entry_reason_use = rescue_reason
+                strict_entry_score = rescue_score
+                r = full[
+                    (full["timestamp"] == rescue_ts) &
+                    (full["strike"] == stk)
+                ].iloc[0]
 
         if entry_allowed:
 
@@ -2038,36 +2213,36 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             
             entry_score = 100 + strict_entry_score + abs(dp) + min(max(vp, 0), 500) * 0.10 + max(pp, 0)
 
-            entry_price = pv  # option buy price at entry candle
+            entry_price = float(r[col_map[side]["price"]])  # option buy price at entry candle
 
             exit_ts, exit_price, _, exit_reason = find_exit_after_entry(
                 full,
-                ts,
+                entry_ts_use,
                 stk,
                 side,
                 entry_price,
                 col_map,
                 strict_entry=True,
-                entry_reason=strict_entry_reason,
+                entry_reason=entry_reason_use,
             )
 
-            entry_price = pv
+            entry_price = float(r[col_map[side]["price"]])
             pnl_points = exit_price - entry_price if exit_price is not None else np.nan
 
             best_move, best_time, best_price = compute_strike_best_move(
-                full, ts, stk, side, entry_price, col_map
+                full, entry_ts_use, stk, side, entry_price, col_map
             )
             bad_move, bad_time, bad_price = compute_strike_bad_move(
-                full, ts, stk, side, entry_price, col_map
+                full, entry_ts_use, stk, side, entry_price, col_map
             )
             top_rows.append((
-            ts, stk, spot, side,
+            entry_ts_use, stk, float(r["spot"]), side,
             entry_price, exit_ts, exit_price, pnl_points,
             best_move, best_time, best_price,
             bad_move, bad_time, bad_price,
-            entry_score, score, dp, gp, vp, pp,
+            entry_score, float(r[f"{side}_score"]), float(r[f"{side}_d_pct"]), float(r[f"{side}_g_pct"]), float(r[f"{side}_v_pct"]), float(r[f"{side}_p_pct"]),
             exit_reason,
-            f"STRICT_ENTRY {strict_entry_reason} STOP={STOP_LOSS_PTS}"
+            f"STRICT_ENTRY {entry_reason_use} STOP={STOP_LOSS_PTS}"
             ))
         
         else:
@@ -2092,6 +2267,9 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     unique_rows.sort(key=lambda x: x[0])
     overlapping_skip_count = 0
     side_switch_count = 0
+    daily_loss_limit = 3
+    daily_loss_count = 0
+    daily_loss_skip_count = 0
     if not ALLOW_OVERLAPPING_TRADES:
         single_trade_rows = []
         active_until = None
@@ -2101,6 +2279,11 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             entry_ts  = r[0]
             exit_ts   = r[5]
             new_side  = r[3]
+            trade_pnl = float(r[7]) if r[7] is not None and not pd.isna(r[7]) else 0.0
+
+            if daily_loss_count >= daily_loss_limit:
+                daily_loss_skip_count += 1
+                continue
 
             if active_until is not None and entry_ts <= active_until:
                 # Same side still active → skip as before
@@ -2144,6 +2327,8 @@ def run_single_analysis(csv_path=None, analysis_date=None):
                     # Now open the new opposite-side trade
                     side_switch_count += 1
                     single_trade_rows.append(r)
+                    if trade_pnl < 0:
+                        daily_loss_count += 1
                     active_until = exit_ts if exit_ts is not None and not pd.isna(exit_ts) else entry_ts
                     active_side  = new_side
                     continue
@@ -2152,6 +2337,8 @@ def run_single_analysis(csv_path=None, analysis_date=None):
                     continue
 
             single_trade_rows.append(r)
+            if trade_pnl < 0:
+                daily_loss_count += 1
             active_until = exit_ts if exit_ts is not None and not pd.isna(exit_ts) else entry_ts
             active_side  = new_side
 
@@ -2171,6 +2358,12 @@ def run_single_analysis(csv_path=None, analysis_date=None):
           f"{dim('Exit bars:')} {bold(str(STRICT_EXIT_CONFIRM_BARS))}   "
           f"{dim('Surge ratio:')} {bold(str(STRICT_EXIT_SURGE_RATIO))}x   "
           f"{dim('Spike override:')} {bold(str(STRICT_SPIKE_OVERRIDE_SCORE) if STRICT_SPIKE_OVERRIDE_SCORE > 0 else 'OFF')}")
+    fake_spike_txt = (
+        f"ON Bars={FAKE_SPIKE_EXIT_MIN_BARS}-{FAKE_SPIKE_EXIT_MAX_BARS} "
+        f"Range+{FAKE_SPIKE_RANGE_BUFFER_PTS:g} Best<{FAKE_SPIKE_MIN_FOLLOW_PTS:g}"
+        if FAKE_SPIKE_EXIT_ENABLED else "OFF"
+    )
+    print(f"  {dim('Fake spike chop exit:')} {bold(fake_spike_txt)}")
     if ALLOW_OVERLAPPING_TRADES:
         print(f"  {dim('Single active trade rule:')} {bold('OFF')}   "
               f"{dim('Overlapping entries allowed')}")
@@ -2180,18 +2373,9 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         print(f"  {dim('Single active trade rule:')} {bold('ON')}   "
               f"{dim('Overlapping entries skipped:')} {bold(str(overlapping_skip_count))}   "
               f"{switch_txt}   "
+              f"{dim(f'Daily loss stop: {daily_loss_count}/{daily_loss_limit}')}   "
+              f"{dim(f'Loss-skip entries: {daily_loss_skip_count}')}   "
               f"{dim('Side-switch:')} {bold('ON' if ALLOW_SIDE_SWITCH else 'OFF')}")
-    print(f"  {dim('Fake spike exit:')} "
-          f"{bold('ON' if FAKE_SPIKE_EXIT_ENABLED else 'OFF')}   "
-          f"{dim('Bars:')} {bold(str(FAKE_SPIKE_EXIT_BARS))}   "
-          f"{dim('Range buffer:')} {bold(str(FAKE_SPIKE_RANGE_BUFFER_PTS))}   "
-          f"{dim('Min follow:')} {bold(str(FAKE_SPIKE_MIN_FOLLOW_PTS))}")
-    print(f"  {dim('Own weak exit:')} "
-          f"{bold('ON' if OWN_WEAK_EXIT_ENABLED else 'OFF')}   "
-          f"{dim('Bars:')} {bold(str(OWN_WEAK_EXIT_BARS))}   "
-          f"{dim('Strikes:')} {bold(str(OWN_WEAK_MIN_STRIKES))}   "
-          f"{dim('D weak:')} {bold(str(OWN_WEAK_DELTA_DROP_PCT))}   "
-          f"{dim('P drop:')} {bold(str(OWN_WEAK_PRICE_DROP_PCT))}")
     print()
 
     h_top = (
@@ -2428,31 +2612,19 @@ def parse_args():
                         help="Block spike overrides before this time (HH:MM). "
                              "Default: 09:45. Prevents session-open spike entries where no trend context exists. "
                              "Use 09:20 (session start) to effectively disable the time guard.")
+    parser.add_argument("--no-fake-spike-exit", action="store_true",
+                        help="Disable fake-spike chop exit for SPIKE_OVERRIDE entries.")
+    parser.add_argument("--fake-spike-exit-min-bars", type=int,
+                        help="SPIKE_OVERRIDE fake-chop exit: first candle count eligible for early chop exit. Default: 4.")
+    parser.add_argument("--fake-spike-exit-max-bars", type=int,
+                        help="SPIKE_OVERRIDE fake-chop exit: last candle count eligible for early chop exit. Default: 7.")
+    parser.add_argument("--fake-spike-range-buffer", type=float,
+                        help="SPIKE_OVERRIDE fake-chop exit: near-entry buffer in option points. Default: 3.")
+    parser.add_argument("--fake-spike-min-follow", type=float,
+                        help="SPIKE_OVERRIDE fake-chop exit: required best favorable move before chop is ignored. Default: 10.")
     parser.add_argument("--no-side-switch", action="store_true",
                         help="Disable side-switch: opposite-side signals while a trade is active are skipped "
                              "instead of closing the current trade and flipping. Default: side-switch ON.")
-    parser.add_argument("--no-fake-spike-exit", action="store_true",
-                        help="Disable fake-spike chop exit for SPIKE_OVERRIDE trades.")
-    parser.add_argument("--fake-spike-exit-bars", type=int,
-                        help="Exit a SPIKE_OVERRIDE trade after this many consecutive candles near entry "
-                             "without follow-through. Default: 15.")
-    parser.add_argument("--fake-spike-range-buffer", type=float,
-                        help="Near-entry buffer in option points for fake-spike exit. "
-                             "Default: 3.0 means price <= entry + 3 counts as back in range.")
-    parser.add_argument("--fake-spike-min-follow", type=float,
-                        help="Minimum favorable move needed to prove spike follow-through. "
-                             "Default: 10.0 option points.")
-    parser.add_argument("--no-own-weak-exit", action="store_true",
-                        help="Disable own-side weakness exit.")
-    parser.add_argument("--own-weak-exit-bars", type=int,
-                        help="Exit after this many own-side weakness warning candles. Default: 2.")
-    parser.add_argument("--own-weak-min-strikes", type=int,
-                        help="Minimum chain strikes where active side has both delta weakness and price dropping. Default: 5.")
-    parser.add_argument("--own-weak-delta-drop", type=float,
-                        help="Active-side delta pct must be <= negative of this value for weakness. "
-                             "For PE this means put delta is moving toward zero, not becoming more negative. Default: 2.0.")
-    parser.add_argument("--own-weak-price-drop", type=float,
-                        help="Active-side price pct must be <= negative of this value for weakness. Default: 3.0.")
     parser.add_argument("--strict-require-volume", action="store_true",
                         help="Require volume threshold on own-side confirmations; otherwise delta+price with non-negative volume can count.")
     parser.add_argument("--console-xlsx", nargs="?", const=OUT_CONSOLE_XLSX,
@@ -2469,11 +2641,9 @@ def apply_arg_config(args):
     global STRICT_CONFIRM_WINDOW, STRICT_MIN_CONFIRM_BARS, STRICT_ALLOW_VOLUME_NEUTRAL
     global STRICT_EXIT_CONFIRM_BARS, STRICT_EXIT_SURGE_RATIO, STRICT_SPIKE_OVERRIDE_SCORE
     global ALLOW_SIDE_SWITCH
-    global FAKE_SPIKE_EXIT_ENABLED, FAKE_SPIKE_EXIT_BARS, FAKE_SPIKE_RANGE_BUFFER_PTS, FAKE_SPIKE_MIN_FOLLOW_PTS
-    global OWN_WEAK_EXIT_ENABLED, OWN_WEAK_EXIT_BARS, OWN_WEAK_MIN_STRIKES
-    global OWN_WEAK_DELTA_DROP_PCT, OWN_WEAK_PRICE_DROP_PCT
     global STRICT_SPIKE_MIN_V80, STRICT_SPIKE_MIN_V150, STRICT_SPIKE_MIN_P5, STRICT_SPIKE_MIN_OPP_P5
     global STRICT_SPIKE_MIN_D4, STRICT_SPIKE_MIN_P6, STRICT_SPIKE_OVERRIDE_MIN_TIME
+    global FAKE_SPIKE_EXIT_ENABLED, FAKE_SPIKE_EXIT_MIN_BARS, FAKE_SPIKE_EXIT_MAX_BARS, FAKE_SPIKE_RANGE_BUFFER_PTS, FAKE_SPIKE_MIN_FOLLOW_PTS
 
     OI_DATA_MODE = args.oi_data
     OI_PRINT_INTERVAL = args.print_interval
@@ -2514,26 +2684,18 @@ def apply_arg_config(args):
     if hasattr(args, "spike_override_min_time") and args.spike_override_min_time is not None:
         # None means disable the guard; pass "off" or "00:00" from CLI to disable
         STRICT_SPIKE_OVERRIDE_MIN_TIME = args.spike_override_min_time
-    if args.no_side_switch:
-        ALLOW_SIDE_SWITCH = False
     if args.no_fake_spike_exit:
         FAKE_SPIKE_EXIT_ENABLED = False
-    if args.fake_spike_exit_bars is not None:
-        FAKE_SPIKE_EXIT_BARS = args.fake_spike_exit_bars
+    if args.fake_spike_exit_min_bars is not None:
+        FAKE_SPIKE_EXIT_MIN_BARS = args.fake_spike_exit_min_bars
+    if args.fake_spike_exit_max_bars is not None:
+        FAKE_SPIKE_EXIT_MAX_BARS = args.fake_spike_exit_max_bars
     if args.fake_spike_range_buffer is not None:
         FAKE_SPIKE_RANGE_BUFFER_PTS = args.fake_spike_range_buffer
     if args.fake_spike_min_follow is not None:
         FAKE_SPIKE_MIN_FOLLOW_PTS = args.fake_spike_min_follow
-    if args.no_own_weak_exit:
-        OWN_WEAK_EXIT_ENABLED = False
-    if args.own_weak_exit_bars is not None:
-        OWN_WEAK_EXIT_BARS = args.own_weak_exit_bars
-    if args.own_weak_min_strikes is not None:
-        OWN_WEAK_MIN_STRIKES = args.own_weak_min_strikes
-    if args.own_weak_delta_drop is not None:
-        OWN_WEAK_DELTA_DROP_PCT = args.own_weak_delta_drop
-    if args.own_weak_price_drop is not None:
-        OWN_WEAK_PRICE_DROP_PCT = args.own_weak_price_drop
+    if args.no_side_switch:
+        ALLOW_SIDE_SWITCH = False
     if args.strict_require_volume:
         STRICT_ALLOW_VOLUME_NEUTRAL = False
 
