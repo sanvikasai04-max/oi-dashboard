@@ -83,7 +83,7 @@ Tunable parameters:
   --spike-min-opp-p5 3          Spike guard: opposite OppP5 count >= this (cross-side confirm) [Jun-27]
   --spike-min-d4 3              Spike depth guard: D4>=3 OR P6>=2 (move not exhausted) [Jun-03]
   --spike-min-p6 2              Spike depth guard: P6>=2 OR D4>=3 (price still has room) [Jun-03]
-  --spike-override-min-time 09:45  No spike overrides before this time (session open) [Jun-03]
+  --spike-override-min-time 09:30  No spike overrides before this time (session open) [Jun-03]
 
 Monthly mode:
   python .\3_strength_analyser.py --monthly --month jan --year 2024
@@ -141,6 +141,7 @@ OUT_CSV          = "strength_report.csv"
 OUT_XLSX         = "strength_report.xlsx"
 REPORTS_DIR      = Path(__file__).resolve().parent / "reports"
 OUT_CONSOLE_XLSX = str(REPORTS_DIR / "console_output.xlsx")
+NIFTY_1MIN_PATH   = Path(__file__).resolve().parent / "nifty_5yr_1min.xlsx"
 TOP_N = 20
 ALLOW_OVERLAPPING_TRADES = False  # False = one active trade only; next entry after exit
 ALLOW_SIDE_SWITCH = True          # True = if opposite side fires while trade active, close and flip
@@ -191,6 +192,7 @@ STRICT_SPIKE_MIN_V80   = 4   # volume >= 80% on at least this many nearby strike
 STRICT_SPIKE_MIN_V150  = 4   # volume >= 150% on at least this many nearby strikes
 STRICT_SPIKE_MIN_P5    = 3   # own price >= 5% on at least this many nearby strikes
 STRICT_SPIKE_MIN_OPP_P5 = 3  # opposite price <= -5% on at least this many nearby strikes
+STRICT_SPIKE_MIN_OPP_P3 = 4  # or broad opposite price <= -3% weakness across this many strikes
 # Depth guard (Jun-03 fix): move must not already be exhausted at entry.
 # D4>=3 means delta >=4% is sustaining across 3+ strikes (not just surface burst).
 # P6>=2 means price is building to 6%+ on 2+ strikes (room to run further).
@@ -200,9 +202,9 @@ STRICT_SPIKE_MIN_P6    = 2   # price >= 6% on at least this many strikes (OR D4 
 # Session open guard (Jun-03 fix): no spike overrides in first N minutes.
 # At session open there are no prior candles to validate the move — all "CONF=1"
 # entries at open are inherently blind. 09:32 example: V80=0 but D5=5 — looked
-# explosive but had no trend context. Time = 09:45 gives 25 minutes of context.
+# explosive but had no trend context. Time = 09:30 gives 10 minutes of context.
 # Set to None to disable (allow spike overrides from session start).
-STRICT_SPIKE_OVERRIDE_MIN_TIME = dtime(9, 45)  # no spike overrides before this time
+STRICT_SPIKE_OVERRIDE_MIN_TIME = dtime(9, 30)  # no spike overrides before this time
 _STRICT_BEST_CACHE = {}
 
 # Exit config: fixed stop, strict opposite confirmation, or force exit only.
@@ -212,6 +214,8 @@ FAKE_SPIKE_EXIT_MIN_BARS = 4
 FAKE_SPIKE_EXIT_MAX_BARS = 7
 FAKE_SPIKE_RANGE_BUFFER_PTS = 3.0
 FAKE_SPIKE_MIN_FOLLOW_PTS = 10.0
+FAKE_SPIKE_ENTRY_HIGH_BUFFER_PTS = 10.0
+_NIFTY_OHLC_CACHE = None
 
 ENTRY_CUTOFF = dtime(15, 0)   # no new entries after 3 PM
 FORCE_EXIT   = dtime(15, 25)  # force exit near market close, after late moves can mature
@@ -451,6 +455,31 @@ def is_print_interval_timestamp(ts):
     ts = pd.Timestamp(ts)
     return ts.minute % print_interval_minutes() == 0
 
+def load_nifty_ohlc():
+    global _NIFTY_OHLC_CACHE
+    if _NIFTY_OHLC_CACHE is not None:
+        return _NIFTY_OHLC_CACHE
+    if not NIFTY_1MIN_PATH.exists():
+        _NIFTY_OHLC_CACHE = pd.DataFrame()
+        return _NIFTY_OHLC_CACHE
+
+    ohlc = pd.read_excel(NIFTY_1MIN_PATH, sheet_name=0)
+    if "datetime" not in ohlc.columns:
+        _NIFTY_OHLC_CACHE = pd.DataFrame()
+        return _NIFTY_OHLC_CACHE
+
+    ohlc["timestamp"] = pd.to_datetime(ohlc["datetime"], dayfirst=True, errors="coerce")
+    keep_cols = ["timestamp", "open", "high", "low", "close"]
+    ohlc = ohlc[[c for c in keep_cols if c in ohlc.columns]].dropna(subset=["timestamp"])
+    ohlc = ohlc.rename(columns={
+        "open": "spot_open",
+        "high": "spot_high",
+        "low": "spot_low",
+        "close": "spot_close",
+    })
+    _NIFTY_OHLC_CACHE = ohlc
+    return _NIFTY_OHLC_CACHE
+
 def month_name(month):
     return pd.Timestamp(2000, month, 1).strftime("%B")
 
@@ -548,6 +577,19 @@ def find_exit_after_entry(
     )
     fake_spike_bar_count = 0
     fake_spike_best_move = 0.0
+    entry_rows = full[
+        (full["timestamp"] == entry_ts) &
+        (full["strike"] == strike)
+    ]
+    entry_spot = None
+    entry_spot_high = None
+    if not entry_rows.empty and "spot" in entry_rows.columns:
+        entry_spot = float(entry_rows.iloc[0]["spot"])
+        entry_spot_high = float(entry_rows.iloc[0].get("spot_high", entry_spot))
+    entry_high_chop_line = (
+        entry_spot_high + FAKE_SPIKE_ENTRY_HIGH_BUFFER_PTS
+        if entry_spot_high is not None else None
+    )
 
     for i, r in trade.iterrows():
         price = r[cm["price"]]
@@ -570,15 +612,23 @@ def find_exit_after_entry(
                 fake_spike_bar_count >= FAKE_SPIKE_EXIT_MIN_BARS and
                 fake_spike_bar_count <= FAKE_SPIKE_EXIT_MAX_BARS
             )
+            entry_high_break_chop = (
+                entry_high_chop_line is not None and
+                float(r.get("spot_close", r["spot"])) >= entry_high_chop_line
+            )
             if (
                 within_window and
                 near_entry and
+                entry_high_break_chop and
                 fake_spike_best_move < FAKE_SPIKE_MIN_FOLLOW_PTS
             ):
                 return r["timestamp"], price, pnl_now, (
-                    f"Exit: fake spike chop bar={fake_spike_bar_count} near entry "
-                    f"BEST<{FAKE_SPIKE_MIN_FOLLOW_PTS:g} "
-                    f"RANGE+{FAKE_SPIKE_RANGE_BUFFER_PTS:g}"
+                    f"Exit: fake spike chop entryHigh+"
+                    f"{FAKE_SPIKE_ENTRY_HIGH_BUFFER_PTS:g} "
+                    f"bar={fake_spike_bar_count} "
+                    f"SPOT={float(r.get('spot_close', r['spot'])):.2f}>={entry_high_chop_line:.2f} "
+                    f"near entry RANGE+{FAKE_SPIKE_RANGE_BUFFER_PTS:g} "
+                    f"BEST<{FAKE_SPIKE_MIN_FOLLOW_PTS:g}"
                 )
 
         # Stop loss
@@ -795,7 +845,7 @@ def strict_cross_snapshot(full, ts, strike, side):
         f"OppD2={opp_d2} OppD4={opp_d4} OppP3={opp_p3} OppP5={opp_p5}"
     )
     # Extra quality metrics returned for spike-override quality checks
-    extras = {"v80": v80, "v150": v150, "p5": p5, "opp_p5": opp_p5, "d4": d4, "p6": p6}
+    extras = {"v80": v80, "v150": v150, "p5": p5, "opp_p3": opp_p3, "opp_p5": opp_p5, "d4": d4, "p6": p6}
     return ok, score, own_count, opp_count, reason, extras
 
 def strict_candidate_strikes(full, ts, strike):
@@ -929,10 +979,18 @@ def strict_cross_entry_ok(full, ts, strike, side):
                 if not p5_ok:
                     blocked_by.append(f"P5={ex.get('p5',0)}<{STRICT_SPIKE_MIN_P5}")
 
-                # Guard C: opposite price confirmation
-                opp_p5_ok = ex.get("opp_p5", 0) >= STRICT_SPIKE_MIN_OPP_P5
+                # Guard C: opposite price confirmation. A sharp collapse
+                # (OppP5) is ideal, but broad 3%+ unwinding also confirms
+                # pressure when the own side is already volume/price backed.
+                opp_p5_ok = (
+                    ex.get("opp_p5", 0) >= STRICT_SPIKE_MIN_OPP_P5 or
+                    ex.get("opp_p3", 0) >= STRICT_SPIKE_MIN_OPP_P3
+                )
                 if not opp_p5_ok:
-                    blocked_by.append(f"OppP5={ex.get('opp_p5',0)}<{STRICT_SPIKE_MIN_OPP_P5}")
+                    blocked_by.append(
+                        f"OppP5={ex.get('opp_p5',0)}<{STRICT_SPIKE_MIN_OPP_P5}/"
+                        f"OppP3={ex.get('opp_p3',0)}<{STRICT_SPIKE_MIN_OPP_P3}"
+                    )
 
                 # Guard D: depth — move must still have room (D4>=3 OR P6>=2)
                 d4_val = ex.get("d4", 0)
@@ -960,7 +1018,8 @@ def strict_cross_entry_ok(full, ts, strike, side):
                         f"V80={ex.get('v80',0)}>={STRICT_SPIKE_MIN_V80} "
                         f"V150={ex.get('v150',0)}>={STRICT_SPIKE_MIN_V150} "
                         f"P5={ex.get('p5',0)}>={STRICT_SPIKE_MIN_P5} "
-                        f"OppP5={ex.get('opp_p5',0)}>={STRICT_SPIKE_MIN_OPP_P5} "
+                        f"OppP5={ex.get('opp_p5',0)}>={STRICT_SPIKE_MIN_OPP_P5}"
+                        f"/OppP3={ex.get('opp_p3',0)}>={STRICT_SPIKE_MIN_OPP_P3} "
                         f"D4={d4_val} P6={p6_val}"
                     )
                     return True, last_snap["score"], reason
@@ -979,7 +1038,10 @@ def strict_cross_entry_ok(full, ts, strike, side):
                                 next_v80_ok = next_ex.get("v80", 0) >= STRICT_SPIKE_MIN_V80
                                 next_v150_ok = next_ex.get("v150", 0) >= STRICT_SPIKE_MIN_V150
                                 next_p5_ok = next_ex.get("p5", 0) >= STRICT_SPIKE_MIN_P5
-                                next_opp_p5_ok = next_ex.get("opp_p5", 0) >= STRICT_SPIKE_MIN_OPP_P5
+                                next_opp_p5_ok = (
+                                    next_ex.get("opp_p5", 0) >= STRICT_SPIKE_MIN_OPP_P5 or
+                                    next_ex.get("opp_p3", 0) >= STRICT_SPIKE_MIN_OPP_P3
+                                )
                                 next_d4_val = next_ex.get("d4", 0)
                                 next_p6_val = next_ex.get("p6", 0)
                                 next_depth_ok = (next_d4_val >= STRICT_SPIKE_MIN_D4) or (next_p6_val >= STRICT_SPIKE_MIN_P6)
@@ -991,7 +1053,8 @@ def strict_cross_entry_ok(full, ts, strike, side):
                                         f"V80={next_ex.get('v80',0)}>={STRICT_SPIKE_MIN_V80} "
                                         f"V150={next_ex.get('v150',0)}>={STRICT_SPIKE_MIN_V150} "
                                         f"P5={next_ex.get('p5',0)}>={STRICT_SPIKE_MIN_P5} "
-                                        f"OppP5={next_ex.get('opp_p5',0)}>={STRICT_SPIKE_MIN_OPP_P5} "
+                                        f"OppP5={next_ex.get('opp_p5',0)}>={STRICT_SPIKE_MIN_OPP_P5}"
+                                        f"/OppP3={next_ex.get('opp_p3',0)}>={STRICT_SPIKE_MIN_OPP_P3} "
                                         f"D4={next_d4_val} P6={next_p6_val}"
                                     )
                                     return True, next_score, reason
@@ -1050,7 +1113,10 @@ def spike_override_volume_rescue(full, ts, strike, side):
         v80_ok = extras.get("v80", 0) >= STRICT_SPIKE_MIN_V80
         v150_ok = extras.get("v150", 0) >= STRICT_SPIKE_MIN_V150
         p5_ok = extras.get("p5", 0) >= STRICT_SPIKE_MIN_P5
-        opp_p5_ok = extras.get("opp_p5", 0) >= STRICT_SPIKE_MIN_OPP_P5
+        opp_p5_ok = (
+            extras.get("opp_p5", 0) >= STRICT_SPIKE_MIN_OPP_P5 or
+            extras.get("opp_p3", 0) >= STRICT_SPIKE_MIN_OPP_P3
+        )
         d4_val = extras.get("d4", 0)
         p6_val = extras.get("p6", 0)
         depth_ok = (d4_val >= STRICT_SPIKE_MIN_D4) or (p6_val >= STRICT_SPIKE_MIN_P6)
@@ -1061,7 +1127,8 @@ def spike_override_volume_rescue(full, ts, strike, side):
                 f"V80={extras.get('v80',0)}>={STRICT_SPIKE_MIN_V80} "
                 f"V150={extras.get('v150',0)}>={STRICT_SPIKE_MIN_V150} "
                 f"P5={extras.get('p5',0)}>={STRICT_SPIKE_MIN_P5} "
-                f"OppP5={extras.get('opp_p5',0)}>={STRICT_SPIKE_MIN_OPP_P5} "
+                f"OppP5={extras.get('opp_p5',0)}>={STRICT_SPIKE_MIN_OPP_P5}"
+                f"/OppP3={extras.get('opp_p3',0)}>={STRICT_SPIKE_MIN_OPP_P3} "
                 f"D4={d4_val} P6={p6_val}"
             )
             return True, rescue_ts, score, rescue_reason
@@ -2010,6 +2077,14 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         }
 
     full       = pd.concat(records, ignore_index=True).sort_values(["timestamp","strike"])
+    nifty_ohlc = load_nifty_ohlc()
+    if not nifty_ohlc.empty:
+        full = full.merge(nifty_ohlc, on="timestamp", how="left")
+    for fallback_col in ("spot_open", "spot_high", "spot_low", "spot_close"):
+        if fallback_col not in full.columns:
+            full[fallback_col] = full["spot"]
+        else:
+            full[fallback_col] = full[fallback_col].fillna(full["spot"])
     timestamps = sorted(full["timestamp"].unique())
 
     W  = 177   # console width - wide enough for all columns plus compact snapshot analysis
@@ -2161,7 +2236,10 @@ def run_single_analysis(csv_path=None, analysis_date=None):
                     pending_v80_ok = pending_ex.get("v80", 0) >= STRICT_SPIKE_MIN_V80
                     pending_v150_ok = pending_ex.get("v150", 0) >= STRICT_SPIKE_MIN_V150
                     pending_p5_ok = pending_ex.get("p5", 0) >= STRICT_SPIKE_MIN_P5
-                    pending_opp_p5_ok = pending_ex.get("opp_p5", 0) >= STRICT_SPIKE_MIN_OPP_P5
+                    pending_opp_p5_ok = (
+                        pending_ex.get("opp_p5", 0) >= STRICT_SPIKE_MIN_OPP_P5 or
+                        pending_ex.get("opp_p3", 0) >= STRICT_SPIKE_MIN_OPP_P3
+                    )
                     pending_d4_val = pending_ex.get("d4", 0)
                     pending_p6_val = pending_ex.get("p6", 0)
                     pending_depth_ok = (pending_d4_val >= STRICT_SPIKE_MIN_D4) or (pending_p6_val >= STRICT_SPIKE_MIN_P6)
@@ -2610,7 +2688,7 @@ def parse_args():
                              "Use 0 to disable P6 side of depth guard.")
     parser.add_argument("--spike-override-min-time", type=parse_time_arg, default=None,
                         help="Block spike overrides before this time (HH:MM). "
-                             "Default: 09:45. Prevents session-open spike entries where no trend context exists. "
+                             "Default: 09:30. Prevents session-open spike entries where no trend context exists. "
                              "Use 09:20 (session start) to effectively disable the time guard.")
     parser.add_argument("--no-fake-spike-exit", action="store_true",
                         help="Disable fake-spike chop exit for SPIKE_OVERRIDE entries.")
