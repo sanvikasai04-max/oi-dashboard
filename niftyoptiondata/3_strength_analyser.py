@@ -2045,6 +2045,19 @@ def entry_row_data_ok(row, side, col_map):
         return False, "DATA_REJECT missing=" + ",".join(missing)
     return True, "DATA_OK"
 
+def entry_strike_itm_ok(strike, spot, side):
+    if safe_float(strike) is None or safe_float(spot) is None:
+        return False, "ITM_REJECT missing-strike-spot"
+
+    strike = float(strike)
+    spot = float(spot)
+    if side == "ce" and strike <= spot:
+        return True, "ITM_OK"
+    if side == "pe" and strike >= spot:
+        return True, "ITM_OK"
+
+    return False, f"ITM_REJECT {side.upper()} strike={strike:.1f} spot={spot:.2f}"
+
 # 
 # XLSX EXPORT   mimics console colours as cell fills / fonts
 # 
@@ -2790,6 +2803,14 @@ def run_single_analysis(csv_path=None, analysis_date=None, preloaded_df=None):
                 entry_reason_use = f"{entry_reason_use} {data_reason}"
 
         if entry_allowed:
+            itm_ok, itm_reason = entry_strike_itm_ok(stk, float(r["spot"]), side)
+            if itm_ok:
+                entry_reason_use = f"{entry_reason_use} {itm_reason}"
+            else:
+                entry_allowed = False
+                entry_reason_use = f"{entry_reason_use} {itm_reason}"
+
+        if entry_allowed:
 
             if side == "pe":
                 pe_pass += 1
@@ -2812,10 +2833,12 @@ def run_single_analysis(csv_path=None, analysis_date=None, preloaded_df=None):
             if side == "pe":
                 pe_strict_reject += 1
 
-    # First sort by ENTRY SCORE so duplicate same-time signals keep the strongest row.
-    top_rows.sort(key=lambda x: x[14], reverse=True)
+    # First sort by ITM distance so duplicate same-time signals keep the
+    # nearest ITM strike. Entry score is the tie-breaker among equally close
+    # candidates.
+    top_rows.sort(key=lambda x: (abs(float(x[1]) - float(x[2])), -float(x[14])))
 
-    # Remove duplicate timestamps: keep only strongest row from same timestamp.
+    # Remove duplicate timestamps: keep nearest ITM row from same timestamp.
     unique_rows = []
     seen_ts = set()
 
