@@ -33,7 +33,7 @@ Three pillars scored independently per snapshot:
 
   Delta pillar (weight 40%)
   -------------------------
-  Minimum own-side delta pct: >= 2 (STRICT_MIN_DELTA_PCT)
+  Minimum own-side delta pct: >= 3 (STRICT_MIN_DELTA_PCT)
   Bonus tiers: >=3, >=4, >=5 (counted across nearby strikes).
   Opposite side: delta must DROP (<= -2, -4, -6); more strikes = stronger score.
 
@@ -69,7 +69,7 @@ EXIT criteria:
 
 Tunable parameters:
   --strict-volume-pct 80        Own-side minimum volume pct
-  --strict-delta-pct 2          Own-side minimum delta pct (opposite must drop by same)
+  --strict-delta-pct 3          Own-side minimum delta pct (opposite must drop by same)
   --strict-price-pct 3          Own-side minimum price pct (opposite must drop by same)
   --strict-same-strikes 3       Minimum own-side confirming strikes
   --strict-opp-strikes 2        Minimum opposite-side confirming strikes
@@ -84,6 +84,9 @@ Tunable parameters:
   --spike-min-d4 3              Spike depth guard: D4>=3 OR P6>=2 (move not exhausted) [Jun-03]
   --spike-min-p6 2              Spike depth guard: P6>=2 OR D4>=3 (price still has room) [Jun-03]
   --spike-override-min-time 09:30  No spike overrides before this time (session open) [Jun-03]
+IV based confirmation:
+  Entry-side IV can be flat or rising.
+  Reject only if entry-side IV is clearly decreasing within current + next 2 snapshots.
 
 Monthly mode:
   python .\3_strength_analyser.py --monthly --month jan --year 2024
@@ -166,7 +169,7 @@ ALLOW_SIDE_SWITCH = True          # True = if opposite side fires while trade ac
 ENTRY_START = dtime(9, 20)
 USE_STRICT_CROSS_ENTRY = True
 STRICT_MIN_VOLUME_PCT = 80
-STRICT_MIN_DELTA_PCT = 2
+STRICT_MIN_DELTA_PCT = 3
 STRICT_MIN_PRICE_PCT = 3
 STRICT_MIN_SAME_STRIKES = 3
 STRICT_MIN_OPP_STRIKES = 2
@@ -175,6 +178,7 @@ STRICT_MIN_CONFIRM_BARS = 3
 STRICT_ALLOW_VOLUME_NEUTRAL = True
 STRICT_EXIT_CONFIRM_BARS = 2
 STRICT_EXIT_SURGE_RATIO  = 1.5   # early exit if 2nd opp score > this × 1st score
+STRICT_EXIT_MIN_OPP_V80 = 3      # opposite exit needs real volume confirmation
 # Spike override: if the current snapshot composite score is >= this value AND
 # at least 1 prior confirmation exists in the window, enter immediately without
 # waiting for STRICT_MIN_CONFIRM_BARS. Captures explosive moves like 12:32 where
@@ -451,6 +455,9 @@ OI_BUILD_MIN_BUY_STRIKES = 2
 OI_BUILD_MIN_SELL_STRIKES = 2
 OI_BUILD_STRONG_BONUS = 4
 OI_BUILD_GAMMA_BONUS_PER_STRIKE = 1
+IV_ENTRY_CONFIRM_LOOKAHEAD = 2
+IV_ENTRY_NEARBY_STRIKES = 11
+IV_ENTRY_MAX_OWN_DROP = -0.10
 
 # ANSI helpers
 def _c(t, code): return f"\033[{code}m{t}\033[0m"
@@ -853,7 +860,7 @@ def find_exit_after_entry(
             full, r["timestamp"], strike, opp
         )
 
-        if opp_ok:
+        if opp_ok and _opp_extras.get("v80", 0) >= STRICT_EXIT_MIN_OPP_V80:
             opp_confirm_history.append({
                 "ts": r["timestamp"],
                 "score": opp_score,
@@ -1476,6 +1483,89 @@ def spike_extreme_dual_count(full, ts, strike, side, delta_min=10.0, price_min=1
 
 def opposite_side(side):
     return "pe" if side == "ce" else "ce"
+
+def side_iv_pressure(full, ts, side):
+    """
+    Average side-wide IV change across nearest strikes.
+
+    Use the same timestamp's nearest strikes so a single far OTM skew row
+    cannot dominate the signal.
+    """
+    timestamps = timestamps_up_to(full, ts)
+    if len(timestamps) < 2:
+        return None
+
+    curr_ts = pd.Timestamp(ts)
+    prev_ts = timestamps[-2]
+    curr = snapshot_at(full, curr_ts)
+    prev = snapshot_at(full, prev_ts)
+    if curr.empty or prev.empty:
+        return None
+
+    iv_col = "call_iv" if side == "ce" else "put_iv"
+    if iv_col not in curr.columns or iv_col not in prev.columns:
+        return None
+
+    spot = safe_float(curr["spot"].iloc[0])
+    if spot is None:
+        return None
+
+    limit = max(1, int(IV_ENTRY_NEARBY_STRIKES))
+    curr_near = (
+        curr.assign(_iv_distance=(curr["strike"].astype(float) - float(spot)).abs())
+        .sort_values(["_iv_distance", "strike"])
+        .head(limit)
+    )
+    strikes = set(curr_near["strike"].astype(float))
+    prev_near = prev[prev["strike"].astype(float).isin(strikes)]
+    if curr_near.empty or prev_near.empty:
+        return None
+
+    curr_avg = pd.to_numeric(curr_near[iv_col], errors="coerce").mean()
+    prev_avg = pd.to_numeric(prev_near[iv_col], errors="coerce").mean()
+    if pd.isna(curr_avg) or pd.isna(prev_avg):
+        return None
+
+    return float(curr_avg - prev_avg), float(curr_avg), float(prev_avg)
+
+def iv_entry_confirmation(full, ts, side):
+    """
+    Confirm entry pressure with side-wide IV within current/next 2 snapshots.
+
+    Reject only when the entry side IV is clearly decreasing. Flat IV is allowed
+    because price/delta/volume can still lead a valid spike before IV expands.
+    """
+    all_ts = list(pd.Index(full["timestamp"].unique()).sort_values())
+    try:
+        start_idx = all_ts.index(pd.Timestamp(ts))
+    except ValueError:
+        return False, ts, "IV_CONFIRM missing-ts"
+
+    opp = opposite_side(side)
+    max_idx = min(len(all_ts) - 1, start_idx + IV_ENTRY_CONFIRM_LOOKAHEAD)
+    last_reason = "IV_CONFIRM no-data"
+    for idx in range(start_idx, max_idx + 1):
+        check_ts = pd.Timestamp(all_ts[idx])
+        own_pressure = side_iv_pressure(full, check_ts, side)
+        opp_pressure = side_iv_pressure(full, check_ts, opp)
+        if own_pressure is None or opp_pressure is None:
+            continue
+
+        own_delta, own_avg, _ = own_pressure
+        opp_delta, opp_avg, _ = opp_pressure
+        last_reason = (
+            f"IV_CONFIRM_WAIT {side.upper()}_IV={own_delta:+.2f} "
+            f"{opp.upper()}_IV={opp_delta:+.2f}"
+        )
+        if own_delta >= IV_ENTRY_MAX_OWN_DROP:
+            return (
+                True,
+                check_ts,
+                f"IV_CONFIRM {side.upper()}_IV={own_delta:+.2f} avg={own_avg:.2f} "
+                f"{opp.upper()}_IV={opp_delta:+.2f} avg={opp_avg:.2f}"
+            )
+
+    return False, ts, last_reason
 # 
 # CORE FUNCTIONS
 # 
@@ -1933,6 +2023,27 @@ def safe_float(x):
         return None if np.isnan(v) else v
     except Exception:
         return None
+
+def entry_row_data_ok(row, side, col_map):
+    """
+    Reject entries where the selected strike has missing displayed metrics.
+
+    Cross-strike confirmation can be strong even if the chosen strike's own
+    row has NaN delta/gamma/volume/price percentages. That makes the trade log
+    misleading and can hide bad source data, so block those candidates.
+    """
+    required = [
+        col_map[side]["price"],
+        f"{side}_score",
+        f"{side}_d_pct",
+        f"{side}_g_pct",
+        f"{side}_v_pct",
+        f"{side}_p_pct",
+    ]
+    missing = [col for col in required if safe_float(row.get(col)) is None]
+    if missing:
+        return False, "DATA_REJECT missing=" + ",".join(missing)
+    return True, "DATA_OK"
 
 # 
 # XLSX EXPORT   mimics console colours as cell fills / fonts
@@ -2653,6 +2764,30 @@ def run_single_analysis(csv_path=None, analysis_date=None, preloaded_df=None):
                     (full["timestamp"] == rescue_ts) &
                     (full["strike"] == stk)
                 ].iloc[0]
+
+        if entry_allowed:
+            iv_ok, iv_ts, iv_reason = iv_entry_confirmation(full, entry_ts_use, side)
+            if iv_ok and iv_ts.time() < ENTRY_CUTOFF:
+                if iv_ts != entry_ts_use:
+                    confirm_rows = full[
+                        (full["timestamp"] == iv_ts) &
+                        (full["strike"] == stk)
+                    ]
+                    if not confirm_rows.empty:
+                        entry_ts_use = iv_ts
+                        r = confirm_rows.iloc[0]
+                entry_reason_use = f"{entry_reason_use} {iv_reason}"
+            else:
+                entry_allowed = False
+                entry_reason_use = f"{entry_reason_use} IV_REJECT {iv_reason}"
+
+        if entry_allowed:
+            data_ok, data_reason = entry_row_data_ok(r, side, col_map)
+            if data_ok:
+                entry_reason_use = f"{entry_reason_use} {data_reason}"
+            else:
+                entry_allowed = False
+                entry_reason_use = f"{entry_reason_use} {data_reason}"
 
         if entry_allowed:
 
