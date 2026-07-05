@@ -99,12 +99,13 @@ Monthly mode:
   to write into console xlsx:
   python .\3_strength_analyser.py --csv oi_2026_06_09.csv --date 2026-06-03 --show-oi-table --print-interval 1min --console-xlsx  oi_1min_output.xlsx
 
-
-  
 """
 import argparse
+import bisect
+import concurrent.futures
 import contextlib
 import io
+import os
 import re
 import sys
 import pandas as pd
@@ -215,6 +216,8 @@ STRICT_THIRD_ENTRY_MIN_NEXT_OWN = 3
 # Set to None to disable (allow spike overrides from session start).
 STRICT_SPIKE_OVERRIDE_MIN_TIME = dtime(9, 30)  # no spike overrides before this time
 _STRICT_BEST_CACHE = {}
+_STRICT_SNAPSHOT_CACHE = {}
+_STRICT_ENTRY_CACHE = {}
 
 # Exit config: fixed stop, strict opposite confirmation, or force exit only.
 STOP_LOSS_PTS = 30
@@ -225,6 +228,207 @@ FAKE_SPIKE_RANGE_BUFFER_PTS = 3.0
 FAKE_SPIKE_MIN_FOLLOW_PTS = 10.0
 FAKE_SPIKE_ENTRY_HIGH_BUFFER_PTS = 10.0
 _NIFTY_OHLC_CACHE = None
+_ANALYSIS_INDEXES = {}
+
+MONTHLY_CONFIG_GLOBALS = [
+    "OI_DATA_MODE",
+    "OI_PRINT_INTERVAL",
+    "SHOW_OI_TABLE",
+    "STRICT_MIN_VOLUME_PCT",
+    "STRICT_MIN_DELTA_PCT",
+    "STRICT_MIN_PRICE_PCT",
+    "STRICT_MIN_SAME_STRIKES",
+    "STRICT_MIN_OPP_STRIKES",
+    "STRICT_CONFIRM_WINDOW",
+    "STRICT_MIN_CONFIRM_BARS",
+    "STRICT_ALLOW_VOLUME_NEUTRAL",
+    "STRICT_EXIT_CONFIRM_BARS",
+    "STRICT_EXIT_SURGE_RATIO",
+    "STRICT_SPIKE_OVERRIDE_SCORE",
+    "ALLOW_SIDE_SWITCH",
+    "STRICT_SPIKE_MIN_V80",
+    "STRICT_SPIKE_MIN_V150",
+    "STRICT_SPIKE_MIN_P5",
+    "STRICT_SPIKE_MIN_OPP_P5",
+    "STRICT_SPIKE_MIN_D4",
+    "STRICT_SPIKE_MIN_P6",
+    "STRICT_SPIKE_OVERRIDE_MIN_TIME",
+    "FAKE_SPIKE_EXIT_ENABLED",
+    "FAKE_SPIKE_EXIT_MIN_BARS",
+    "FAKE_SPIKE_EXIT_MAX_BARS",
+    "FAKE_SPIKE_RANGE_BUFFER_PTS",
+    "FAKE_SPIKE_MIN_FOLLOW_PTS",
+]
+
+def runtime_config():
+    return {name: globals()[name] for name in MONTHLY_CONFIG_GLOBALS}
+
+def apply_runtime_config(config):
+    for name, value in config.items():
+        globals()[name] = value
+
+def monthly_worker_run(task):
+    csv_file, trade_date, config = task
+    apply_runtime_config(config)
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        return run_single_analysis(str(csv_file), str(trade_date))
+
+def build_analysis_indexes(full):
+    """Attach cheap lookup indexes used by the entry/exit confirmation engine."""
+    _ANALYSIS_INDEXES[id(full)] = {
+        "timestamps_sorted": sorted(full["timestamp"].unique()),
+        "snapshot_by_ts": {
+            ts: snap
+            for ts, snap in full.groupby("timestamp", sort=False)
+        },
+        "rows_by_strike": {
+            float(strike): rows.sort_values("timestamp")
+            for strike, rows in full.groupby("strike", sort=False)
+        },
+    }
+    precompute_strict_snapshot_cache(full)
+
+def _strict_snapshot_result_from_arrays(side, candidate_strike, own_v, own_d, own_p, opp_v, opp_d, opp_p):
+    tag = "STRICT_BULL" if side == "ce" else "STRICT_BEAR"
+
+    v80   = int(np.count_nonzero(own_v >= 80))
+    v100  = int(np.count_nonzero(own_v >= 100))
+    v150  = int(np.count_nonzero(own_v >= 150))
+    v200  = int(np.count_nonzero(own_v >= 200))
+
+    d2    = int(np.count_nonzero(own_d >= 2))
+    d3    = int(np.count_nonzero(own_d >= 3))
+    d4    = int(np.count_nonzero(own_d >= 4))
+    d5    = int(np.count_nonzero(own_d >= 5))
+
+    p3    = int(np.count_nonzero(own_p >= 3))
+    p4    = int(np.count_nonzero(own_p >= 4))
+    p5    = int(np.count_nonzero(own_p >= 5))
+    p6    = int(np.count_nonzero(own_p >= 6))
+    p7    = int(np.count_nonzero(own_p >= 7))
+
+    own_full_confirm = (
+        (own_d >= STRICT_MIN_DELTA_PCT) &
+        (own_p >= STRICT_MIN_PRICE_PCT) &
+        (own_v >= STRICT_MIN_VOLUME_PCT)
+    )
+    own_count = int(np.count_nonzero(own_full_confirm))
+
+    if STRICT_ALLOW_VOLUME_NEUTRAL:
+        own_partial = (
+            (own_d >= STRICT_MIN_DELTA_PCT) &
+            (own_p >= STRICT_MIN_PRICE_PCT) &
+            (own_v >= 0)
+        )
+        own_count = max(own_count, int(np.count_nonzero(own_partial)))
+
+    opp_d2 = int(np.count_nonzero(opp_d <= -2))
+    opp_d4 = int(np.count_nonzero(opp_d <= -4))
+    opp_d6 = int(np.count_nonzero(opp_d <= -6))
+    opp_p3 = int(np.count_nonzero(opp_p <= -3))
+    opp_p5 = int(np.count_nonzero(opp_p <= -5))
+
+    opp_confirm = (
+        (opp_d <= -STRICT_MIN_DELTA_PCT) &
+        (opp_p <= -STRICT_MIN_PRICE_PCT) &
+        (
+            (opp_v >= STRICT_MIN_VOLUME_PCT) |
+            (opp_v < 0) |
+            ((opp_v >= 0) & (opp_p <= -5))
+        )
+    )
+    opp_count = int(np.count_nonzero(opp_confirm))
+
+    volume_score  = (v80 * 2) + (v100 * 1) + (v150 * 2) + (v200 * 3)
+    delta_score   = (d2 * 3)  + (d3 * 2)   + (d4 * 2)   + (d5 * 3)
+    price_score   = (p3 * 3)  + (p4 * 2)   + (p5 * 2)   + (p6 * 2)   + (p7 * 3)
+    opp_score_pts = (opp_d2 * 2) + (opp_d4 * 2) + (opp_d6 * 2) + (opp_p3 * 2) + (opp_p5 * 2)
+
+    score = int(
+        delta_score * 0.40 +
+        price_score * 0.40 +
+        volume_score * 0.20 +
+        opp_score_pts
+    )
+    ok = own_count >= STRICT_MIN_SAME_STRIKES and opp_count >= STRICT_MIN_OPP_STRIKES
+    reason = (
+        f"{tag} OWN={own_count} OPP={opp_count} "
+        f"V80={v80} V100={v100} V150={v150} V200={v200} "
+        f"D2={d2} D3={d3} D4={d4} D5={d5} "
+        f"P3={p3} P4={p4} P5={p5} P6={p6} P7={p7} "
+        f"OppD2={opp_d2} OppD4={opp_d4} OppP3={opp_p3} OppP5={opp_p5}"
+    )
+    extras = {"v80": v80, "v150": v150, "p5": p5, "opp_p3": opp_p3, "opp_p5": opp_p5, "d4": d4, "p6": p6}
+    return ok, score, own_count, opp_count, reason, extras
+
+def precompute_strict_snapshot_cache(full):
+    """Pre-score every timestamp/strike/side once so entry checks are lookups."""
+    for ts, snapshot in _ANALYSIS_INDEXES[id(full)]["snapshot_by_ts"].items():
+        snap = snapshot.sort_values("strike")
+        strikes = snap["strike"].to_numpy(dtype=float, copy=False)
+        side_arrays = {
+            "ce": {
+                "own_v": snap["ce_v_pct"].to_numpy(dtype=float, copy=False),
+                "own_d": snap["ce_d_pct"].to_numpy(dtype=float, copy=False),
+                "own_p": snap["ce_p_pct"].to_numpy(dtype=float, copy=False),
+                "opp_v": snap["pe_v_pct"].to_numpy(dtype=float, copy=False),
+                "opp_d": snap["pe_d_pct"].to_numpy(dtype=float, copy=False),
+                "opp_p": snap["pe_p_pct"].to_numpy(dtype=float, copy=False),
+            },
+            "pe": {
+                "own_v": snap["pe_v_pct"].to_numpy(dtype=float, copy=False),
+                "own_d": snap["pe_d_pct"].to_numpy(dtype=float, copy=False),
+                "own_p": snap["pe_p_pct"].to_numpy(dtype=float, copy=False),
+                "opp_v": snap["ce_v_pct"].to_numpy(dtype=float, copy=False),
+                "opp_d": snap["ce_d_pct"].to_numpy(dtype=float, copy=False),
+                "opp_p": snap["ce_p_pct"].to_numpy(dtype=float, copy=False),
+            },
+        }
+
+        for idx, strike in enumerate(strikes):
+            low = strike - STRIKES_NEARBY * STRIKE_STEP
+            high = strike + STRIKES_NEARBY * STRIKE_STEP
+            nearby_mask = (strikes >= low) & (strikes <= high)
+            for side, arr in side_arrays.items():
+                result = _strict_snapshot_result_from_arrays(
+                    side,
+                    strike,
+                    arr["own_v"][nearby_mask],
+                    arr["own_d"][nearby_mask],
+                    arr["own_p"][nearby_mask],
+                    arr["opp_v"][nearby_mask],
+                    arr["opp_d"][nearby_mask],
+                    arr["opp_p"][nearby_mask],
+                )
+                _STRICT_SNAPSHOT_CACHE[(id(full), pd.Timestamp(ts), float(strike), side)] = result
+
+def snapshot_at(full, ts):
+    index = _ANALYSIS_INDEXES.get(id(full))
+    if index is not None:
+        snap = index["snapshot_by_ts"].get(ts)
+        if snap is not None:
+            return snap
+    return full[full["timestamp"] == ts]
+
+def rows_for_strike(full, strike):
+    index = _ANALYSIS_INDEXES.get(id(full))
+    if index is not None:
+        rows = index.get("rows_by_strike", {}).get(float(strike))
+        if rows is not None:
+            return rows
+    return full[full["strike"] == strike].sort_values("timestamp")
+
+def timestamps_up_to(full, ts):
+    index = _ANALYSIS_INDEXES.get(id(full))
+    if index is None:
+        timestamps = sorted(full["timestamp"].unique())
+        _ANALYSIS_INDEXES[id(full)] = {
+            "timestamps_sorted": timestamps,
+            "snapshot_by_ts": {},
+        }
+    else:
+        timestamps = index["timestamps_sorted"]
+    return timestamps[:bisect.bisect_right(timestamps, ts)]
 
 ENTRY_CUTOFF = dtime(15, 0)   # no new entries after 3 PM
 FORCE_EXIT   = dtime(15, 25)  # force exit near market close, after late moves can mature
@@ -570,10 +774,8 @@ def find_exit_after_entry(
     cm = col_map[side]
     stop_loss_pts = STOP_LOSS_PTS
 
-    trade = full[
-        (full["timestamp"] > entry_ts) &
-        (full["strike"] == strike)
-    ].copy().sort_values("timestamp").reset_index(drop=True)
+    trade = rows_for_strike(full, strike)
+    trade = trade[trade["timestamp"] > entry_ts].reset_index(drop=True)
 
     if trade.empty:
         return entry_ts, entry_price, 0, "No future data"
@@ -700,10 +902,8 @@ def compute_strike_best_move(full, entry_ts, strike, side, entry_price, col_map)
     Checks future candles after entry for the same strike and same side price.
     """
     cm = col_map[side]
-    future = full[
-        (full["timestamp"] > entry_ts) &
-        (full["strike"] == strike)
-    ].copy().sort_values("timestamp")
+    future = rows_for_strike(full, strike)
+    future = future[future["timestamp"] > entry_ts]
 
     if future.empty:
         return 0.0, entry_ts, entry_price
@@ -721,10 +921,8 @@ def compute_strike_bad_move(full, entry_ts, strike, side, entry_price, col_map):
     Shows the maximum adverse option-price move after entry.
     """
     cm = col_map[side]
-    future = full[
-        (full["timestamp"] > entry_ts) &
-        (full["strike"] == strike)
-    ].copy().sort_values("timestamp")
+    future = rows_for_strike(full, strike)
+    future = future[future["timestamp"] > entry_ts]
 
     if future.empty:
         return 0.0, entry_ts, entry_price
@@ -756,38 +954,45 @@ def strict_cross_snapshot(full, ts, strike, side):
 
     Returns: ok, composite_score, own_count, opp_count, reason
     """
-    nearby = full[
-        (full["timestamp"] == ts) &
-        (full["strike"] >= strike - STRIKES_NEARBY * STRIKE_STEP) &
-        (full["strike"] <= strike + STRIKES_NEARBY * STRIKE_STEP)
+    cache_key = (id(full), pd.Timestamp(ts), float(strike), side)
+    cached = _STRICT_SNAPSHOT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    snapshot = snapshot_at(full, ts)
+    nearby = snapshot[
+        (snapshot["strike"] >= strike - STRIKES_NEARBY * STRIKE_STEP) &
+        (snapshot["strike"] <= strike + STRIKES_NEARBY * STRIKE_STEP)
     ].copy()
 
     if nearby.empty:
-        return False, 0, 0, 0, "STRICT_NO_NEARBY"
+        result = (False, 0, 0, 0, "STRICT_NO_NEARBY", {})
+        _STRICT_SNAPSHOT_CACHE[cache_key] = result
+        return result
 
     own = "ce" if side == "ce" else "pe"
     opp = "pe" if side == "ce" else "ce"
     tag = "STRICT_BULL" if side == "ce" else "STRICT_BEAR"
 
     # OWN SIDE
-    own_v = nearby[f"{own}_v_pct"]
-    v80   = _count_true(own_v >= 80)
-    v100  = _count_true(own_v >= 100)
-    v150  = _count_true(own_v >= 150)
-    v200  = _count_true(own_v >= 200)
+    own_v = nearby[f"{own}_v_pct"].to_numpy(dtype=float, copy=False)
+    v80   = int(np.count_nonzero(own_v >= 80))
+    v100  = int(np.count_nonzero(own_v >= 100))
+    v150  = int(np.count_nonzero(own_v >= 150))
+    v200  = int(np.count_nonzero(own_v >= 200))
 
-    own_d = nearby[f"{own}_d_pct"]
-    d2    = _count_true(own_d >= 2)
-    d3    = _count_true(own_d >= 3)
-    d4    = _count_true(own_d >= 4)
-    d5    = _count_true(own_d >= 5)
+    own_d = nearby[f"{own}_d_pct"].to_numpy(dtype=float, copy=False)
+    d2    = int(np.count_nonzero(own_d >= 2))
+    d3    = int(np.count_nonzero(own_d >= 3))
+    d4    = int(np.count_nonzero(own_d >= 4))
+    d5    = int(np.count_nonzero(own_d >= 5))
 
-    own_p = nearby[f"{own}_p_pct"]
-    p3    = _count_true(own_p >= 3)
-    p4    = _count_true(own_p >= 4)
-    p5    = _count_true(own_p >= 5)
-    p6    = _count_true(own_p >= 6)
-    p7    = _count_true(own_p >= 7)
+    own_p = nearby[f"{own}_p_pct"].to_numpy(dtype=float, copy=False)
+    p3    = int(np.count_nonzero(own_p >= 3))
+    p4    = int(np.count_nonzero(own_p >= 4))
+    p5    = int(np.count_nonzero(own_p >= 5))
+    p6    = int(np.count_nonzero(own_p >= 6))
+    p7    = int(np.count_nonzero(own_p >= 7))
 
     # Per-strike full confirmation (all three pillars)
     own_full_confirm = (
@@ -795,7 +1000,7 @@ def strict_cross_snapshot(full, ts, strike, side):
         (own_p >= STRICT_MIN_PRICE_PCT) &
         (own_v >= STRICT_MIN_VOLUME_PCT)
     )
-    own_count = _count_true(own_full_confirm)
+    own_count = int(np.count_nonzero(own_full_confirm))
 
     # Volume-neutral partial confirmation (delta+price strong, volume not negative)
     if STRICT_ALLOW_VOLUME_NEUTRAL:
@@ -804,18 +1009,18 @@ def strict_cross_snapshot(full, ts, strike, side):
             (own_p >= STRICT_MIN_PRICE_PCT) &
             (own_v >= 0)
         )
-        own_count = max(own_count, _count_true(own_partial))
+        own_count = max(own_count, int(np.count_nonzero(own_partial)))
 
     # OPPOSITE SIDE
-    opp_d = nearby[f"{opp}_d_pct"]
-    opp_p = nearby[f"{opp}_p_pct"]
-    opp_v = nearby[f"{opp}_v_pct"]
+    opp_d = nearby[f"{opp}_d_pct"].to_numpy(dtype=float, copy=False)
+    opp_p = nearby[f"{opp}_p_pct"].to_numpy(dtype=float, copy=False)
+    opp_v = nearby[f"{opp}_v_pct"].to_numpy(dtype=float, copy=False)
 
-    opp_d2 = _count_true(opp_d <= -2)
-    opp_d4 = _count_true(opp_d <= -4)
-    opp_d6 = _count_true(opp_d <= -6)
-    opp_p3 = _count_true(opp_p <= -3)
-    opp_p5 = _count_true(opp_p <= -5)
+    opp_d2 = int(np.count_nonzero(opp_d <= -2))
+    opp_d4 = int(np.count_nonzero(opp_d <= -4))
+    opp_d6 = int(np.count_nonzero(opp_d <= -6))
+    opp_p3 = int(np.count_nonzero(opp_p <= -3))
+    opp_p5 = int(np.count_nonzero(opp_p <= -5))
 
     # Opposite side confirm: three valid patterns of weakness
     #   1. Active selling:   opp_v >= 80%  + delta down + price down
@@ -832,7 +1037,7 @@ def strict_cross_snapshot(full, ts, strike, side):
             ((opp_v >= 0) & (opp_p <= -5))             # pattern 3: slow unwind
         )
     )
-    opp_count = _count_true(opp_confirm)
+    opp_count = int(np.count_nonzero(opp_confirm))
 
     # COMPOSITE SCORE: delta 40%, price 40%, volume 20%
     volume_score  = (v80 * 2) + (v100 * 1) + (v150 * 2) + (v200 * 3)
@@ -857,13 +1062,15 @@ def strict_cross_snapshot(full, ts, strike, side):
     )
     # Extra quality metrics returned for spike-override quality checks
     extras = {"v80": v80, "v150": v150, "p5": p5, "opp_p3": opp_p3, "opp_p5": opp_p5, "d4": d4, "p6": p6}
-    return ok, score, own_count, opp_count, reason, extras
+    result = (ok, score, own_count, opp_count, reason, extras)
+    _STRICT_SNAPSHOT_CACHE[cache_key] = result
+    return result
 
 def strict_candidate_strikes(full, ts, strike):
-    nearby = full[
-        (full["timestamp"] == ts) &
-        (full["strike"] >= strike - STRIKES_NEARBY * STRIKE_STEP) &
-        (full["strike"] <= strike + STRIKES_NEARBY * STRIKE_STEP)
+    snapshot = snapshot_at(full, ts)
+    nearby = snapshot[
+        (snapshot["strike"] >= strike - STRIKES_NEARBY * STRIKE_STEP) &
+        (snapshot["strike"] <= strike + STRIKES_NEARBY * STRIKE_STEP)
     ]["strike"].dropna().unique()
     return sorted(nearby)
 
@@ -924,7 +1131,27 @@ def strict_cross_entry_ok(full, ts, strike, side):
     if not USE_STRICT_CROSS_ENTRY:
         return False, 0, "STRICT_OFF"
 
-    timestamps = [x for x in sorted(full["timestamp"].unique()) if x <= ts]
+    cache_key = (
+        id(full),
+        pd.Timestamp(ts),
+        float(strike),
+        side,
+        STRICT_MIN_CONFIRM_BARS,
+        STRICT_CONFIRM_WINDOW,
+        STRICT_SPIKE_OVERRIDE_SCORE,
+        STRICT_SPIKE_MIN_V80,
+        STRICT_SPIKE_MIN_V150,
+        STRICT_SPIKE_MIN_P5,
+        STRICT_SPIKE_MIN_OPP_P5,
+        STRICT_SPIKE_MIN_D4,
+        STRICT_SPIKE_MIN_P6,
+        STRICT_ALLOW_VOLUME_NEUTRAL,
+    )
+    cached = _STRICT_ENTRY_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    timestamps = timestamps_up_to(full, ts)
     recent = timestamps[-STRICT_CONFIRM_WINDOW:]
 
     # Collect all snapshot results in the window
@@ -1033,7 +1260,9 @@ def strict_cross_entry_ok(full, ts, strike, side):
                         f"/OppP3={ex.get('opp_p3',0)}>={STRICT_SPIKE_MIN_OPP_P3} "
                         f"D4={d4_val} P6={p6_val}"
                     )
-                    return True, last_snap["score"], reason
+                    result = (True, last_snap["score"], reason)
+                    _STRICT_ENTRY_CACHE[cache_key] = result
+                    return result
                 else:
                     volume_only_block = (
                         any(item.startswith(("V80=", "V150=")) for item in blocked_by) and
@@ -1068,30 +1297,40 @@ def strict_cross_entry_ok(full, ts, strike, side):
                                         f"/OppP3={next_ex.get('opp_p3',0)}>={STRICT_SPIKE_MIN_OPP_P3} "
                                         f"D4={next_d4_val} P6={next_p6_val}"
                                     )
-                                    return True, next_score, reason
+                                    result = (True, next_score, reason)
+                                    _STRICT_ENTRY_CACHE[cache_key] = result
+                                    return result
                     if any(item.startswith(("V80=", "V150=")) for item in blocked_by):
-                        return False, last_snap["score"], (
+                        result = (False, last_snap["score"], (
                             f"SPIKE_PENDING ({', '.join(blocked_by)}) "
                             f"score={last_snap['score']} CONF={len(confirmations)}/{len(recent)} "
                             f"WAIT=1-2"
-                        )
-                    return False, 0, (
+                        ))
+                        _STRICT_ENTRY_CACHE[cache_key] = result
+                        return result
+                    result = (False, 0, (
                         f"SPIKE_OVERRIDE_BLOCKED ({', '.join(blocked_by)}) "
                         f"score={last_snap['score']} CONF={len(confirmations)}/{len(recent)}"
-                    )
-        return False, 0, (
+                    ))
+                    _STRICT_ENTRY_CACHE[cache_key] = result
+                    return result
+        result = (False, 0, (
             f"STRICT_WAIT {len(confirmations)}/{STRICT_MIN_CONFIRM_BARS} "
             f"in window {len(recent)}"
-        )
+        ))
+        _STRICT_ENTRY_CACHE[cache_key] = result
+        return result
 
     first = confirmations[0]
     last  = confirmations[-1]
 
     # Growing strength check: last confirmation must be >= first
     if last["units"] < first["units"]:
-        return False, last["score"], (
+        result = (False, last["score"], (
             f"STRICT_NOT_STRONGER last_units={last['units']}<first_units={first['units']}"
-        )
+        ))
+        _STRICT_ENTRY_CACHE[cache_key] = result
+        return result
 
     reason = (
         last["reason"] +
@@ -1099,7 +1338,9 @@ def strict_cross_entry_ok(full, ts, strike, side):
         f"FIRST_UNITS={first['units']} LAST_UNITS={last['units']} "
         f"FIRST_SCORE={first['score']} LAST_SCORE={last['score']}"
     )
-    return True, last["score"], reason
+    result = (True, last["score"], reason)
+    _STRICT_ENTRY_CACHE[cache_key] = result
+    return result
 
 def spike_override_volume_rescue(full, ts, strike, side):
     """
@@ -1220,12 +1461,16 @@ def spike_extreme_dual_count(full, ts, strike, side, delta_min=10.0, price_min=1
     d_col = f"{side}_d_pct"
     p_col = f"{side}_p_pct"
     count = 0
+    snapshot = snapshot_at(full, ts)
+    by_strike = {
+        float(r.strike): r
+        for r in snapshot[["strike", d_col, p_col]].itertuples(index=False)
+    }
     for candidate_strike in nearby:
-        rows = full[(full["timestamp"] == ts) & (full["strike"] == candidate_strike)]
-        if rows.empty:
+        r = by_strike.get(float(candidate_strike))
+        if r is None:
             continue
-        r = rows.iloc[0]
-        if float(r[d_col]) >= delta_min and float(r[p_col]) >= price_min:
+        if float(getattr(r, d_col)) >= delta_min and float(getattr(r, p_col)) >= price_min:
             count += 1
     return count
 
@@ -1641,10 +1886,18 @@ def pct_change_col(series):
     return (series.pct_change(fill_method=None) * 100).round(2)
 
 def rolling_pct_rank(series, window=20):
-    return series.rolling(window, min_periods=1).apply(
-        lambda x: (x[-1] > x[:-1]).mean() * 100 if len(x) > 1 else 50.0,
-        raw=True
-    )
+    values = pd.to_numeric(series, errors="coerce").to_numpy(dtype=float)
+    out = np.empty(len(values), dtype=float)
+    out[:] = np.nan
+    for i, current in enumerate(values):
+        if i == 0 or np.isnan(current):
+            out[i] = 50.0
+            continue
+        start = max(0, i - window + 1)
+        prior = values[start:i]
+        prior = prior[~np.isnan(prior)]
+        out[i] = (current > prior).mean() * 100 if len(prior) else 50.0
+    return pd.Series(out, index=series.index)
 
 def compute_strength_score(delta_rank, gamma_rank, volume_rank, price_rank):
     return (
@@ -1655,14 +1908,21 @@ def compute_strength_score(delta_rank, gamma_rank, volume_rank, price_rank):
     ).round(1)
 
 def cross_candle_trend(series, n):
-    def slope_sign(x):
-        if len(x) < 2: return 0
-        xs = np.arange(len(x))
-        slope = np.polyfit(xs, x, 1)[0]
-        if slope > 0:  return 1
-        if slope < 0:  return -1
-        return 0
-    return series.rolling(n, min_periods=2).apply(slope_sign, raw=True)
+    values = pd.to_numeric(series, errors="coerce").to_numpy(dtype=float)
+    out = np.zeros(len(values), dtype=float)
+    for i in range(len(values)):
+        start = max(0, i - n + 1)
+        window_vals = values[start:i + 1]
+        window_vals = window_vals[~np.isnan(window_vals)]
+        if len(window_vals) < 2:
+            out[i] = 0
+            continue
+        xs = np.arange(len(window_vals), dtype=float)
+        x_centered = xs - xs.mean()
+        y_centered = window_vals - window_vals.mean()
+        slope = float(np.dot(x_centered, y_centered))
+        out[i] = 1 if slope > 0 else -1 if slope < 0 else 0
+    return pd.Series(out, index=series.index)
 
 def cross_candle_pct(series, n):
     return ((series - series.shift(n)) / series.shift(n).abs() * 100).round(2)
@@ -1966,8 +2226,10 @@ def _export_xlsx(full, layer1_rows, layer2_rows, opp_rows, sides, col_map, save_
 # 
 # MAIN
 # 
-def run_single_analysis(csv_path=None, analysis_date=None):
+def run_single_analysis(csv_path=None, analysis_date=None, preloaded_df=None):
     _STRICT_BEST_CACHE.clear()
+    _STRICT_SNAPSHOT_CACHE.clear()
+    _STRICT_ENTRY_CACHE.clear()
     csv_path = csv_path or CSV_PATH
     analysis_date = analysis_date or ANALYSIS_DATE
 
@@ -1976,7 +2238,10 @@ def run_single_analysis(csv_path=None, analysis_date=None):
         raise FileNotFoundError(f"CSV not found: {csv_path}\nRun 1_db_to_csv.py first.")
 
     print(bold(cyan(f"\n  Loading {csv_path} ")))
-    df = pd.read_csv(csv, parse_dates=["timestamp"])
+    if preloaded_df is None:
+        df = pd.read_csv(csv, parse_dates=["timestamp"])
+    else:
+        df = preloaded_df
     print("CSV date range:", df["timestamp"].min(), "to", df["timestamp"].max())
 
 
@@ -2136,6 +2401,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             full[fallback_col] = full["spot"]
         else:
             full[fallback_col] = full[fallback_col].fillna(full["spot"])
+    build_analysis_indexes(full)
     timestamps = sorted(full["timestamp"].unique())
 
     W  = 177   # console width - wide enough for all columns plus compact snapshot analysis
@@ -2146,6 +2412,7 @@ def run_single_analysis(csv_path=None, analysis_date=None):
     # 
     snapshot_rows = []
     layer1_rows = []
+    entry_candidate_rows = []
     display_full = full[full["timestamp"].map(is_print_interval_timestamp)].copy() if SHOW_OI_TABLE else None
     for side in sides:
         if SHOW_OI_TABLE:
@@ -2164,19 +2431,22 @@ def run_single_analysis(csv_path=None, analysis_date=None):
             full[f"{side}_price_drop_weakness"]
         ].copy()
         for _, r in sub.iterrows():
-            layer1_rows.append((r["timestamp"], r["strike"], r["spot"], side,
-                                r[f"{side}_score"],
-                                r[col_map[side]["delta"]], r[f"{side}_d_pct"],
-                                r[col_map[side]["gamma"]], r[f"{side}_g_pct"],
-                                r[col_map[side]["volume"]],r[f"{side}_v_pct"],
-                                r[col_map[side]["price"]], r[f"{side}_p_pct"],
-                                r[col_map[side]["iv"]]))
+            row_tuple = (r["timestamp"], r["strike"], r["spot"], side,
+                         r[f"{side}_score"],
+                         r[col_map[side]["delta"]], r[f"{side}_d_pct"],
+                         r[col_map[side]["gamma"]], r[f"{side}_g_pct"],
+                         r[col_map[side]["volume"]],r[f"{side}_v_pct"],
+                         r[col_map[side]["price"]], r[f"{side}_p_pct"],
+                         r[col_map[side]["iv"]])
+            layer1_rows.append(row_tuple)
+            if r[f"{side}_same_spike"] or r[f"{side}_price_volume_build"]:
+                entry_candidate_rows.append(row_tuple)
 
     # Same timestamp  all CE first  all PE next
     if SHOW_OI_TABLE:
         snapshot_rows.sort(key=lambda x: (x[0], 0 if x[3] == "ce" else 1, x[1]))
     layer1_rows.sort(key=lambda x: (x[0], 0 if x[3] == "ce" else 1, x[1]))
-    entry_source_rows = layer1_rows
+    entry_source_rows = entry_candidate_rows
     entry_source_rows.sort(key=lambda x: (x[0], 0 if x[3] == "ce" else 1, x[1]))
 
     if SHOW_OI_TABLE:
@@ -2393,33 +2663,13 @@ def run_single_analysis(csv_path=None, analysis_date=None):
 
             entry_price = float(r[col_map[side]["price"]])  # option buy price at entry candle
 
-            exit_ts, exit_price, _, exit_reason = find_exit_after_entry(
-                full,
-                entry_ts_use,
-                stk,
-                side,
-                entry_price,
-                col_map,
-                strict_entry=True,
-                entry_reason=entry_reason_use,
-            )
-
-            entry_price = float(r[col_map[side]["price"]])
-            pnl_points = exit_price - entry_price if exit_price is not None else np.nan
-
-            best_move, best_time, best_price = compute_strike_best_move(
-                full, entry_ts_use, stk, side, entry_price, col_map
-            )
-            bad_move, bad_time, bad_price = compute_strike_bad_move(
-                full, entry_ts_use, stk, side, entry_price, col_map
-            )
             top_rows.append((
             entry_ts_use, stk, float(r["spot"]), side,
-            entry_price, exit_ts, exit_price, pnl_points,
-            best_move, best_time, best_price,
-            bad_move, bad_time, bad_price,
+            entry_price, None, None, np.nan,
+            0.0, entry_ts_use, entry_price,
+            0.0, entry_ts_use, entry_price,
             entry_score, float(r[f"{side}_score"]), float(r[f"{side}_d_pct"]), float(r[f"{side}_g_pct"]), float(r[f"{side}_v_pct"]), float(r[f"{side}_p_pct"]),
-            exit_reason,
+            "",
             f"STRICT_ENTRY {entry_reason_use} STOP={STOP_LOSS_PTS}"
             ))
         
@@ -2443,6 +2693,39 @@ def run_single_analysis(csv_path=None, analysis_date=None):
 
     # Print entries in proper time order, not score order.
     unique_rows.sort(key=lambda x: x[0])
+
+    priced_rows = []
+    for r in unique_rows:
+        entry_ts_use, stk, spot, side, entry_price = r[0], r[1], r[2], r[3], float(r[4])
+        entry_reason_use = str(r[21])
+        exit_ts, exit_price, _, exit_reason = find_exit_after_entry(
+            full,
+            entry_ts_use,
+            stk,
+            side,
+            entry_price,
+            col_map,
+            strict_entry=True,
+            entry_reason=entry_reason_use,
+        )
+        pnl_points = exit_price - entry_price if exit_price is not None else np.nan
+        best_move, best_time, best_price = compute_strike_best_move(
+            full, entry_ts_use, stk, side, entry_price, col_map
+        )
+        bad_move, bad_time, bad_price = compute_strike_bad_move(
+            full, entry_ts_use, stk, side, entry_price, col_map
+        )
+        priced_rows.append((
+            entry_ts_use, stk, spot, side,
+            entry_price, exit_ts, exit_price, pnl_points,
+            best_move, best_time, best_price,
+            bad_move, bad_time, bad_price,
+            r[14], r[15], r[16], r[17], r[18], r[19],
+            exit_reason,
+            r[21],
+        ))
+    unique_rows = priced_rows
+
     overlapping_skip_count = 0
     side_switch_count = 0
     daily_loss_limit = 3
@@ -2735,6 +3018,8 @@ def parse_args():
                         help="Print the full snapshot OI buildup table before the entry/exit table. Hidden by default for faster runs.")
     parser.add_argument("--no-next-week", action="store_true",
                         help="Monthly mode: do not include first 7 days of next month.")
+    parser.add_argument("--monthly-workers", type=int, default=min(4, os.cpu_count() or 1),
+                        help="Monthly mode worker processes. Default: up to 4. Use 1 for serial mode.")
     parser.add_argument("--strict-volume-pct", type=float,
                         help="Minimum own-side volume percentage. Default: 80.")
     parser.add_argument("--strict-delta-pct", type=float,
@@ -2970,11 +3255,24 @@ def run_monthly(args):
         print(red(f"No trading dates found in {csv_dir} for {start_date} to {end_date}"))
         return []
 
-    results = []
-    for csv_file, trade_date in csv_files:
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            result = run_single_analysis(str(csv_file), str(trade_date))
-        results.append(result)
+    workers = max(1, int(getattr(args, "monthly_workers", 1) or 1))
+    if workers > 1 and len(csv_files) > 1:
+        config = runtime_config()
+        tasks = [(csv_file, trade_date, config) for csv_file, trade_date in csv_files]
+        print(dim(f"Monthly workers: {workers}"))
+        with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as executor:
+            results = list(executor.map(monthly_worker_run, tasks))
+    else:
+        results = []
+        loaded_csv = None
+        loaded_df = None
+        for csv_file, trade_date in csv_files:
+            if loaded_csv != csv_file:
+                loaded_df = pd.read_csv(csv_file, parse_dates=["timestamp"])
+                loaded_csv = csv_file
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                result = run_single_analysis(str(csv_file), str(trade_date), preloaded_df=loaded_df)
+            results.append(result)
 
     print_compact_monthly_summary(results, month, args.year, start_date, end_date)
     return results
