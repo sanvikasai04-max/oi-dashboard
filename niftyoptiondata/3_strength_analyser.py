@@ -102,6 +102,14 @@ Monthly mode:
   to write into console xlsx:
   python .\3_strength_analyser.py --csv oi_2026_06_09.csv --date 2026-06-03 --show-oi-table --print-interval 1min --console-xlsx  oi_1min_output.xlsx
 
+   monthly data run:
+   python .\3_strength_analyser.py --monthly --month jan --year 2026 --console-xlsx monthly_2026_jan.xlsx
+python .\3_strength_analyser.py --monthly --month feb --year 2026 --console-xlsx monthly_2026_feb.xlsx
+python .\3_strength_analyser.py --monthly --month march --year 2026 --console-xlsx monthly_2026_march.xlsx
+python .\3_strength_analyser.py --monthly --month april --year 2026 --console-xlsx monthly_2026_april.xlsx
+python .\3_strength_analyser.py --monthly --month may --year 2026 --console-xlsx monthly_2026_may.xlsx
+python .\3_strength_analyser.py --monthly --month june --year 2026 --console-xlsx monthly_2026_june.xlsx
+python .\3_strength_analyser.py --monthly --month july --year 2026 --console-xlsx monthly_2026_july.xlsx
 """
 import argparse
 import bisect
@@ -173,6 +181,9 @@ STRICT_MIN_DELTA_PCT = 3
 STRICT_MIN_PRICE_PCT = 3
 STRICT_MIN_SAME_STRIKES = 3
 STRICT_MIN_OPP_STRIKES = 2
+STRICT_GAMMA_ALIGNMENT_REQUIRED = False
+STRICT_GAMMA_MIN_OWN_UP = 2
+STRICT_GAMMA_MIN_OPP_DOWN = 2
 STRICT_CONFIRM_WINDOW = 5
 STRICT_MIN_CONFIRM_BARS = 3
 STRICT_ALLOW_VOLUME_NEUTRAL = True
@@ -292,7 +303,7 @@ def build_analysis_indexes(full):
     }
     precompute_strict_snapshot_cache(full)
 
-def _strict_snapshot_result_from_arrays(side, candidate_strike, own_v, own_d, own_p, opp_v, opp_d, opp_p):
+def _strict_snapshot_result_from_arrays(side, candidate_strike, own_v, own_d, own_p, own_g, opp_v, opp_d, opp_p, opp_g, strikes=None, spot=None):
     tag = "STRICT_BULL" if side == "ce" else "STRICT_BEAR"
 
     v80   = int(np.count_nonzero(own_v >= 80))
@@ -336,6 +347,21 @@ def _strict_snapshot_result_from_arrays(side, candidate_strike, own_v, own_d, ow
     opp_p3 = int(np.count_nonzero(opp_p <= -3))
     opp_p5 = int(np.count_nonzero(opp_p <= -5))
 
+    own_g_up = int(np.count_nonzero(own_g > 0))
+    opp_g_down = int(np.count_nonzero(opp_g < 0))
+    gamma_zone = "NEARBY"
+    if strikes is not None and spot is not None and len(strikes):
+        atm = round(float(spot) / STRIKE_STEP) * STRIKE_STEP
+        if side == "ce":
+            zone_mask = strikes <= atm
+            gamma_zone = f"UP_ATM_ITM<=ATM{atm:g}"
+        else:
+            zone_mask = strikes >= atm
+            gamma_zone = f"DOWN_ATM_ITM>=ATM{atm:g}"
+        if np.any(zone_mask):
+            own_g_up = int(np.count_nonzero(own_g[zone_mask] > 0))
+            opp_g_down = int(np.count_nonzero(opp_g[zone_mask] < 0))
+
     opp_confirm = (
         (opp_d <= -STRICT_MIN_DELTA_PCT) &
         (opp_p <= -STRICT_MIN_PRICE_PCT) &
@@ -362,14 +388,19 @@ def _strict_snapshot_result_from_arrays(side, candidate_strike, own_v, own_d, ow
         (opp_price_score * 0.33) +
         (opp_volume_score * 0.33)
     )
-    ok = own_count >= STRICT_MIN_SAME_STRIKES and opp_count >= STRICT_MIN_OPP_STRIKES
+    gamma_ok = (
+        not STRICT_GAMMA_ALIGNMENT_REQUIRED or
+        (own_g_up >= STRICT_GAMMA_MIN_OWN_UP and opp_g_down >= STRICT_GAMMA_MIN_OPP_DOWN)
+    )
+    ok = own_count >= STRICT_MIN_SAME_STRIKES and opp_count >= STRICT_MIN_OPP_STRIKES and gamma_ok
     reason = (
         f"{tag} OWN={own_count} OPP={opp_count} "
         f"V80={v80} V100={v100} V150={v150} V200={v200} "
         f"D2={d2} D3={d3} D4={d4} D5={d5} "
         f"P3={p3} P4={p4} P5={p5} P6={p6} P7={p7} "
         f"OppV80={opp_v80} OppV100={opp_v100} OppV150={opp_v150} OppV200={opp_v200} "
-        f"OppD2={opp_d2} OppD4={opp_d4} OppD6={opp_d6} OppP3={opp_p3} OppP5={opp_p5}"
+        f"OppD2={opp_d2} OppD4={opp_d4} OppD6={opp_d6} OppP3={opp_p3} OppP5={opp_p5} "
+        f"GAMMA_OWN_UP={own_g_up} GAMMA_OPP_DOWN={opp_g_down} GAMMA_ZONE={gamma_zone}"
     )
     extras = {"v80": v80, "v150": v150, "p5": p5, "opp_p3": opp_p3, "opp_p5": opp_p5, "d4": d4, "p6": p6}
     return ok, score, own_count, opp_count, reason, extras
@@ -384,21 +415,26 @@ def precompute_strict_snapshot_cache(full):
                 "own_v": snap["ce_v_pct"].to_numpy(dtype=float, copy=False),
                 "own_d": snap["ce_d_pct"].to_numpy(dtype=float, copy=False),
                 "own_p": snap["ce_p_pct"].to_numpy(dtype=float, copy=False),
+                "own_g": snap["ce_g_pct"].to_numpy(dtype=float, copy=False),
                 "opp_v": snap["pe_v_pct"].to_numpy(dtype=float, copy=False),
                 "opp_d": snap["pe_d_pct"].to_numpy(dtype=float, copy=False),
                 "opp_p": snap["pe_p_pct"].to_numpy(dtype=float, copy=False),
+                "opp_g": snap["pe_g_pct"].to_numpy(dtype=float, copy=False),
             },
             "pe": {
                 "own_v": snap["pe_v_pct"].to_numpy(dtype=float, copy=False),
                 "own_d": snap["pe_d_pct"].to_numpy(dtype=float, copy=False),
                 "own_p": snap["pe_p_pct"].to_numpy(dtype=float, copy=False),
+                "own_g": snap["pe_g_pct"].to_numpy(dtype=float, copy=False),
                 "opp_v": snap["ce_v_pct"].to_numpy(dtype=float, copy=False),
                 "opp_d": snap["ce_d_pct"].to_numpy(dtype=float, copy=False),
                 "opp_p": snap["ce_p_pct"].to_numpy(dtype=float, copy=False),
+                "opp_g": snap["ce_g_pct"].to_numpy(dtype=float, copy=False),
             },
         }
 
         for idx, strike in enumerate(strikes):
+            spot = float(snap.iloc[idx]["spot"]) if "spot" in snap.columns else None
             low = strike - STRIKES_NEARBY * STRIKE_STEP
             high = strike + STRIKES_NEARBY * STRIKE_STEP
             nearby_mask = (strikes >= low) & (strikes <= high)
@@ -409,9 +445,13 @@ def precompute_strict_snapshot_cache(full):
                     arr["own_v"][nearby_mask],
                     arr["own_d"][nearby_mask],
                     arr["own_p"][nearby_mask],
+                    arr["own_g"][nearby_mask],
                     arr["opp_v"][nearby_mask],
                     arr["opp_d"][nearby_mask],
                     arr["opp_p"][nearby_mask],
+                    arr["opp_g"][nearby_mask],
+                    strikes[nearby_mask],
+                    spot,
                 )
                 _STRICT_SNAPSHOT_CACHE[(id(full), pd.Timestamp(ts), float(strike), side)] = result
 
@@ -552,6 +592,38 @@ def _reason_score(reason):
         return f"SCORE={m.group(1)}"
     return ""
 
+def _entry_trigger_info(reason):
+    text = str(reason)
+    counts = _reason_counts(text)
+
+    if "SPIKE_OVERRIDE_PENDING" in text:
+        entry_type = "PENDING_SPIKE"
+    elif "SPIKE_OVERRIDE_NEXT_VOL" in text:
+        entry_type = "SPIKE_NEXT_VOL"
+    elif "SPIKE_OVERRIDE_RESCUE" in text:
+        entry_type = "SPIKE_RESCUE"
+    elif "SPIKE_OVERRIDE" in text:
+        entry_type = "SPIKE"
+    elif "CONF=" in text:
+        entry_type = "CONFIRM"
+    else:
+        entry_type = "UNKNOWN"
+
+    parts = [f"TYPE={entry_type}"]
+    m = re.search(r"\bCONF=(\d+/\d+)", text)
+    if m:
+        parts.append(f"CONF={m.group(1)}")
+    if entry_type == "CONFIRM":
+        if "FIRST_SCORE" in counts:
+            parts.append(f"FIRST_SCORE={counts['FIRST_SCORE']}")
+        if "LAST_SCORE" in counts:
+            parts.append(f"LAST_SCORE={counts['LAST_SCORE']}")
+        if "FIRST_UNITS" in counts:
+            parts.append(f"FIRST_UNITS={counts['FIRST_UNITS']}")
+        if "LAST_UNITS" in counts:
+            parts.append(f"LAST_UNITS={counts['LAST_UNITS']}")
+    return " ".join(parts)
+
 def scorecard_line(reason, side, exit_reason=None):
     counts = _reason_counts(reason)
     exit_counts = _reason_counts(exit_reason or "")
@@ -559,22 +631,27 @@ def scorecard_line(reason, side, exit_reason=None):
     own_volume = " ".join(_score_count(k, counts.get(k, 0)) for k in ("V80", "V100", "V150", "V200"))
     own_delta = " ".join(_score_count(k, counts.get(k, 0)) for k in ("D2", "D3", "D4", "D5"))
     own_price = " ".join(_score_count(k, counts.get(k, 0)) for k in ("P3", "P4", "P5", "P6", "P7"))
+    own_gamma = " ".join(_score_count(k, counts.get(k, 0)) for k in ("GAMMA_OWN_UP",))
     opp_volume = " ".join(_score_count(k, counts.get(k, 0)) for k in ("OppV80", "OppV100", "OppV150", "OppV200"))
     opp_delta = " ".join(_score_count(k, counts.get(k, 0)) for k in ("OppD2", "OppD4", "OppD6"))
     opp_price = " ".join(_score_count(k, counts.get(k, 0)) for k in ("OppP3", "OppP5"))
+    opp_gamma = " ".join(_score_count(k, counts.get(k, 0)) for k in ("GAMMA_OPP_DOWN",))
 
     side_txt = bright_green(side.upper()) if side == "ce" else bright_red(side.upper())
     entry_score = _reason_score(reason)
     entry_score_txt = bold(entry_score) if entry_score else dim("SCORE=n/a")
+    entry_trigger_txt = yellow(_entry_trigger_info(reason))
 
     lines = [
-        f"    {cyan('ENTRY SCORECARD')} {side_txt} {entry_score_txt}",
+        f"    {cyan('ENTRY SCORECARD')} {side_txt} {entry_score_txt} {entry_trigger_txt}",
         f"      {dim('Own volume :')} {own_volume}",
         f"      {dim('Own delta  :')} {own_delta}",
         f"      {dim('Own price  :')} {own_price}",
+        f"      {dim('Own gamma  :')} {own_gamma}",
         f"      {dim('Opp volume :')} {opp_volume}",
         f"      {dim('Opp delta  :')} {opp_delta}",
         f"      {dim('Opp price  :')} {opp_price}",
+        f"      {dim('Opp gamma  :')} {opp_gamma}",
     ]
 
     if exit_reason is not None:
@@ -604,12 +681,15 @@ def compact_score_log(prefix, reason, side=None):
     volume = " ".join(_score_count(k, counts.get(k, 0)) for k in ("V80", "V150", "OppV80", "OppV150"))
     delta = " ".join(_score_count(k, counts.get(k, 0)) for k in ("D3", "D5", "OppD4", "OppD6"))
     price = " ".join(_score_count(k, counts.get(k, 0)) for k in ("P5", "P7", "OppP3", "OppP5"))
+    gamma = " ".join(_score_count(k, counts.get(k, 0)) for k in ("GAMMA_OWN_UP", "GAMMA_OPP_DOWN"))
     score_txt = bold(score) if score else dim("SCORE=n/a")
+    trigger_txt = yellow(_entry_trigger_info(reason))
     return (
-        f"      {prefix}{side_txt} {score_txt}  "
+        f"      {prefix}{side_txt} {score_txt}  {trigger_txt}  "
         f"{cyan('VOL')}[{volume}]  "
         f"{yellow('DELTA')}[{delta}]  "
-        f"{magenta('PRICE')}[{price}]"
+        f"{magenta('PRICE')}[{price}]  "
+        f"{orange('GAMMA')}[{gamma}]"
     )
 
 def compact_exit_log(exit_reason):
@@ -628,7 +708,12 @@ def compact_exit_log(exit_reason):
         parts.append(dim(f"FIRST_UNITS={counts['FIRST_UNITS']}"))
     if "LAST_UNITS" in counts:
         parts.append(dim(f"LAST_UNITS={counts['LAST_UNITS']}"))
-    return f"      {magenta('EXIT SCORE')} {' '.join(parts)}  {dim('REASON')} {short_exit_reason(exit_reason)}"
+    gamma = ""
+    if "GAMMA_OWN_UP" in counts or "GAMMA_OPP_DOWN" in counts:
+        gamma = "  " + orange("GAMMA") + "[" + " ".join(
+            _score_count(k, counts.get(k, 0)) for k in ("GAMMA_OWN_UP", "GAMMA_OPP_DOWN")
+        ) + "]"
+    return f"      {magenta('EXIT SCORE')} {' '.join(parts)}{gamma}  {dim('REASON')} {short_exit_reason(exit_reason)}"
 
 def short_exit_reason(exit_reason):
     text = str(exit_reason)
@@ -841,7 +926,7 @@ def date_from_oi_filename(path):
     yyyy, mm, dd = match.groups()
     return pd.Timestamp(int(yyyy), int(mm), int(dd)).date()
 
-def monthly_date_range(year, month, include_next_week=True):
+def monthly_date_range(year, month, include_next_week=False):
     start = pd.Timestamp(year, month, 1)
     end = start + pd.offsets.MonthEnd(0)
     if include_next_week:
@@ -1155,12 +1240,30 @@ def strict_cross_snapshot(full, ts, strike, side):
     opp_d = nearby[f"{opp}_d_pct"].to_numpy(dtype=float, copy=False)
     opp_p = nearby[f"{opp}_p_pct"].to_numpy(dtype=float, copy=False)
     opp_v = nearby[f"{opp}_v_pct"].to_numpy(dtype=float, copy=False)
+    own_g = nearby[f"{own}_g_pct"].to_numpy(dtype=float, copy=False)
+    opp_g = nearby[f"{opp}_g_pct"].to_numpy(dtype=float, copy=False)
 
     opp_d2 = int(np.count_nonzero(opp_d <= -2))
     opp_d4 = int(np.count_nonzero(opp_d <= -4))
     opp_d6 = int(np.count_nonzero(opp_d <= -6))
     opp_p3 = int(np.count_nonzero(opp_p <= -3))
     opp_p5 = int(np.count_nonzero(opp_p <= -5))
+
+    own_g_up = int(np.count_nonzero(own_g > 0))
+    opp_g_down = int(np.count_nonzero(opp_g < 0))
+    gamma_zone = "NEARBY"
+    if "spot" in nearby.columns:
+        atm = round(float(nearby.iloc[0]["spot"]) / STRIKE_STEP) * STRIKE_STEP
+        strikes = nearby["strike"].to_numpy(dtype=float, copy=False)
+        if side == "ce":
+            zone_mask = strikes <= atm
+            gamma_zone = f"UP_ATM_ITM<=ATM{atm:g}"
+        else:
+            zone_mask = strikes >= atm
+            gamma_zone = f"DOWN_ATM_ITM>=ATM{atm:g}"
+        if np.any(zone_mask):
+            own_g_up = int(np.count_nonzero(own_g[zone_mask] > 0))
+            opp_g_down = int(np.count_nonzero(opp_g[zone_mask] < 0))
 
     # Opposite side confirm: three valid patterns of weakness
     #   1. Active selling:   opp_v >= 80%  + delta down + price down
@@ -1196,14 +1299,19 @@ def strict_cross_snapshot(full, ts, strike, side):
         (opp_volume_score * 0.33)
     )
 
-    ok = own_count >= STRICT_MIN_SAME_STRIKES and opp_count >= STRICT_MIN_OPP_STRIKES
+    gamma_ok = (
+        not STRICT_GAMMA_ALIGNMENT_REQUIRED or
+        (own_g_up >= STRICT_GAMMA_MIN_OWN_UP and opp_g_down >= STRICT_GAMMA_MIN_OPP_DOWN)
+    )
+    ok = own_count >= STRICT_MIN_SAME_STRIKES and opp_count >= STRICT_MIN_OPP_STRIKES and gamma_ok
     reason = (
         f"{tag} OWN={own_count} OPP={opp_count} "
         f"V80={v80} V100={v100} V150={v150} V200={v200} "
         f"D2={d2} D3={d3} D4={d4} D5={d5} "
         f"P3={p3} P4={p4} P5={p5} P6={p6} P7={p7} "
         f"OppV80={opp_v80} OppV100={opp_v100} OppV150={opp_v150} OppV200={opp_v200} "
-        f"OppD2={opp_d2} OppD4={opp_d4} OppD6={opp_d6} OppP3={opp_p3} OppP5={opp_p5}"
+        f"OppD2={opp_d2} OppD4={opp_d4} OppD6={opp_d6} OppP3={opp_p3} OppP5={opp_p5} "
+        f"GAMMA_OWN_UP={own_g_up} GAMMA_OPP_DOWN={opp_g_down} GAMMA_ZONE={gamma_zone}"
     )
     # Extra quality metrics returned for spike-override quality checks
     extras = {"v80": v80, "v150": v150, "p5": p5, "opp_p3": opp_p3, "opp_p5": opp_p5, "d4": d4, "p6": p6}
@@ -3193,7 +3301,6 @@ def run_single_analysis(csv_path=None, analysis_date=None, preloaded_df=None):
                 f"{rjust(color_pct(pp), 9)}  "
                 f"{exit_reason:<28}  {reason}"
             )
-            print(scorecard_line(reason, side, exit_reason))
 
         sep(W)
     if not unique_rows:
@@ -3524,7 +3631,7 @@ def run_monthly(args):
     start_date, end_date = monthly_date_range(
         args.year,
         month,
-        include_next_week=not args.no_next_week,
+        include_next_week=False,
     )
 
     csv_dir = Path(args.csv_dir) if args.csv_dir else (LIVE_OI_DATA_DIR if args.oi_data == "live" else BACK_OI_DATA_DIR)
@@ -3534,9 +3641,9 @@ def run_monthly(args):
         if not file_date:
             continue
 
-        # A month-end trading date can live inside the next weekly expiry CSV.
-        # Scan one extra week of expiry files, but only keep trading dates that
-        # are inside the requested monthly date range.
+        # Month-end trading dates can live inside the next weekly expiry CSV.
+        # Scan one extra week of files, but only keep trade dates inside the
+        # requested calendar month below.
         if file_date < start_date or file_date > (pd.Timestamp(end_date) + pd.Timedelta(days=7)).date():
             continue
 
