@@ -152,7 +152,7 @@ ALLOW_SIDE_SWITCH = True          # True = if opposite side fires while trade ac
 
 # Entry/exit model: multi-factor cross-strike + cross-candle confirmation.
 #
-# THREE PILLARS per snapshot (delta 40%, price 40%, volume 20%):
+# THREE PILLARS per snapshot (delta 33%, price 33%, volume 33%):
 #   Volume: own >= 80%; bonus tiers >= 100/150/200%; opposite sell or exit.
 #   Delta:  own >= 2%; bonus tiers >= 3/4/5%; opposite drops <= -2/-4/-6%.
 #   Price:  own >= 3%; bonus tiers >= 4/5/6/7%; opposite drops <= -3/-5%.
@@ -326,6 +326,10 @@ def _strict_snapshot_result_from_arrays(side, candidate_strike, own_v, own_d, ow
         )
         own_count = max(own_count, int(np.count_nonzero(own_partial)))
 
+    opp_v80 = int(np.count_nonzero(opp_v >= 80))
+    opp_v100 = int(np.count_nonzero(opp_v >= 100))
+    opp_v150 = int(np.count_nonzero(opp_v >= 150))
+    opp_v200 = int(np.count_nonzero(opp_v >= 200))
     opp_d2 = int(np.count_nonzero(opp_d <= -2))
     opp_d4 = int(np.count_nonzero(opp_d <= -4))
     opp_d6 = int(np.count_nonzero(opp_d <= -6))
@@ -343,16 +347,20 @@ def _strict_snapshot_result_from_arrays(side, candidate_strike, own_v, own_d, ow
     )
     opp_count = int(np.count_nonzero(opp_confirm))
 
-    volume_score  = (v80 * 2) + (v100 * 1) + (v150 * 2) + (v200 * 3)
-    delta_score   = (d2 * 3)  + (d3 * 2)   + (d4 * 2)   + (d5 * 3)
-    price_score   = (p3 * 3)  + (p4 * 2)   + (p5 * 2)   + (p6 * 2)   + (p7 * 3)
-    opp_score_pts = (opp_d2 * 2) + (opp_d4 * 2) + (opp_d6 * 2) + (opp_p3 * 2) + (opp_p5 * 2)
+    volume_score = (v80 * 2) + (v100 * 3) + (v150 * 4) + (v200 * 5)
+    delta_score = (d2 * 2) + (d3 * 3) + (d4 * 4) + (d5 * 5)
+    price_score = (p3 * 2) + (p4 * 3) + (p5 * 4) + (p6 * 5) + (p7 * 6)
+    opp_volume_score = (opp_v80 * 2) + (opp_v100 * 3) + (opp_v150 * 4) + (opp_v200 * 5)
+    opp_delta_score = (opp_d2 * 2) + (opp_d4 * 4) + (opp_d6 * 6)
+    opp_price_score = (opp_p3 * 3) + (opp_p5 * 5)
 
     score = int(
-        delta_score * 0.40 +
-        price_score * 0.40 +
-        volume_score * 0.20 +
-        opp_score_pts
+        (delta_score * 0.33) +
+        (price_score * 0.33) +
+        (volume_score * 0.33) +
+        (opp_delta_score * 0.33) +
+        (opp_price_score * 0.33) +
+        (opp_volume_score * 0.33)
     )
     ok = own_count >= STRICT_MIN_SAME_STRIKES and opp_count >= STRICT_MIN_OPP_STRIKES
     reason = (
@@ -360,7 +368,8 @@ def _strict_snapshot_result_from_arrays(side, candidate_strike, own_v, own_d, ow
         f"V80={v80} V100={v100} V150={v150} V200={v200} "
         f"D2={d2} D3={d3} D4={d4} D5={d5} "
         f"P3={p3} P4={p4} P5={p5} P6={p6} P7={p7} "
-        f"OppD2={opp_d2} OppD4={opp_d4} OppP3={opp_p3} OppP5={opp_p5}"
+        f"OppV80={opp_v80} OppV100={opp_v100} OppV150={opp_v150} OppV200={opp_v200} "
+        f"OppD2={opp_d2} OppD4={opp_d4} OppD6={opp_d6} OppP3={opp_p3} OppP5={opp_p5}"
     )
     extras = {"v80": v80, "v150": v150, "p5": p5, "opp_p3": opp_p3, "opp_p5": opp_p5, "d4": d4, "p6": p6}
     return ok, score, own_count, opp_count, reason, extras
@@ -511,6 +520,128 @@ def strength_label(score):
     if score >= 50: return green("MODERATE")
     if score >= 25: return yellow("WEAK    ")
     return red("VERY WK ")
+
+def _score_count(txt, value):
+    label = f"{txt}={value}"
+    try:
+        val = float(value)
+    except Exception:
+        return dim(label)
+    if val >= 4:
+        return bright_green(label)
+    if val >= 2:
+        return yellow(label)
+    return red(label)
+
+def _reason_counts(reason):
+    return {
+        key: value
+        for key, value in re.findall(r"\b([A-Za-z][A-Za-z0-9_]*)=(-?\d+(?:\.\d+)?)", str(reason))
+    }
+
+def _reason_score(reason):
+    text = str(reason)
+    m = re.search(r"\bLAST_SCORE=(-?\d+(?:\.\d+)?)", text)
+    if m:
+        return f"LAST_SCORE={m.group(1)}"
+    m = re.search(r"\bFIRST_SCORE=(-?\d+(?:\.\d+)?)", text)
+    if m:
+        return f"FIRST_SCORE={m.group(1)}"
+    m = re.search(r"\bscore=(-?\d+(?:\.\d+)?)", text, flags=re.IGNORECASE)
+    if m:
+        return f"SCORE={m.group(1)}"
+    return ""
+
+def scorecard_line(reason, side, exit_reason=None):
+    counts = _reason_counts(reason)
+    exit_counts = _reason_counts(exit_reason or "")
+
+    own_volume = " ".join(_score_count(k, counts.get(k, 0)) for k in ("V80", "V100", "V150", "V200"))
+    own_delta = " ".join(_score_count(k, counts.get(k, 0)) for k in ("D2", "D3", "D4", "D5"))
+    own_price = " ".join(_score_count(k, counts.get(k, 0)) for k in ("P3", "P4", "P5", "P6", "P7"))
+    opp_volume = " ".join(_score_count(k, counts.get(k, 0)) for k in ("OppV80", "OppV100", "OppV150", "OppV200"))
+    opp_delta = " ".join(_score_count(k, counts.get(k, 0)) for k in ("OppD2", "OppD4", "OppD6"))
+    opp_price = " ".join(_score_count(k, counts.get(k, 0)) for k in ("OppP3", "OppP5"))
+
+    side_txt = bright_green(side.upper()) if side == "ce" else bright_red(side.upper())
+    entry_score = _reason_score(reason)
+    entry_score_txt = bold(entry_score) if entry_score else dim("SCORE=n/a")
+
+    lines = [
+        f"    {cyan('ENTRY SCORECARD')} {side_txt} {entry_score_txt}",
+        f"      {dim('Own volume :')} {own_volume}",
+        f"      {dim('Own delta  :')} {own_delta}",
+        f"      {dim('Own price  :')} {own_price}",
+        f"      {dim('Opp volume :')} {opp_volume}",
+        f"      {dim('Opp delta  :')} {opp_delta}",
+        f"      {dim('Opp price  :')} {opp_price}",
+    ]
+
+    if exit_reason is not None:
+        exit_score = _reason_score(exit_reason)
+        exit_bits = []
+        if exit_score:
+            exit_bits.append(bold(exit_score))
+        if "CNT" in exit_counts:
+            exit_bits.append(yellow(f"CNT={exit_counts['CNT']}"))
+        if "FIRST_UNITS" in exit_counts:
+            exit_bits.append(dim(f"FIRST_UNITS={exit_counts['FIRST_UNITS']}"))
+        if "LAST_UNITS" in exit_counts:
+            exit_bits.append(dim(f"LAST_UNITS={exit_counts['LAST_UNITS']}"))
+        exit_summary = " ".join(exit_bits) if exit_bits else dim("no exit score")
+        lines.append(f"    {magenta('EXIT SCORECARD')} {exit_summary} {dim('Reason:')} {exit_reason}")
+
+    return "\n".join(lines)
+
+def compact_score_log(prefix, reason, side=None):
+    counts = _reason_counts(reason)
+    score = _reason_score(reason)
+    side_txt = ""
+    if side:
+        side_txt = bright_green(side.upper()) if str(side).lower() == "ce" else bright_red(side.upper())
+        side_txt = f" {side_txt}"
+
+    volume = " ".join(_score_count(k, counts.get(k, 0)) for k in ("V80", "V150", "OppV80", "OppV150"))
+    delta = " ".join(_score_count(k, counts.get(k, 0)) for k in ("D3", "D5", "OppD4", "OppD6"))
+    price = " ".join(_score_count(k, counts.get(k, 0)) for k in ("P5", "P7", "OppP3", "OppP5"))
+    score_txt = bold(score) if score else dim("SCORE=n/a")
+    return (
+        f"      {prefix}{side_txt} {score_txt}  "
+        f"{cyan('VOL')}[{volume}]  "
+        f"{yellow('DELTA')}[{delta}]  "
+        f"{magenta('PRICE')}[{price}]"
+    )
+
+def compact_exit_log(exit_reason):
+    counts = _reason_counts(exit_reason)
+    score = _reason_score(exit_reason)
+    parts = []
+    if "FIRST_SCORE" in counts:
+        parts.append(bold(f"FIRST_SCORE={counts['FIRST_SCORE']}"))
+    if "LAST_SCORE" in counts:
+        parts.append(bold(f"LAST_SCORE={counts['LAST_SCORE']}"))
+    if not parts:
+        parts.append(bold(score) if score else dim("SCORE=n/a"))
+    if "CNT" in counts:
+        parts.append(yellow(f"CNT={counts['CNT']}"))
+    if "FIRST_UNITS" in counts:
+        parts.append(dim(f"FIRST_UNITS={counts['FIRST_UNITS']}"))
+    if "LAST_UNITS" in counts:
+        parts.append(dim(f"LAST_UNITS={counts['LAST_UNITS']}"))
+    return f"      {magenta('EXIT SCORE')} {' '.join(parts)}  {dim('REASON')} {short_exit_reason(exit_reason)}"
+
+def short_exit_reason(exit_reason):
+    text = str(exit_reason)
+    if text.startswith("Exit: opposite "):
+        m = re.search(r"Exit: opposite\s+([A-Z]+)\s+confirm", text)
+        return f"Exit: opposite {m.group(1)} confirm" if m else "Exit: opposite confirm"
+    if text.startswith("Exit: strong opposite surge "):
+        m = re.search(r"Exit: strong opposite surge\s+([A-Z]+)", text)
+        return f"Exit: strong opposite surge {m.group(1)}" if m else "Exit: strong opposite surge"
+    if text.startswith("Exit: fake spike chop"):
+        m = re.search(r"bar=(\d+)", text)
+        return f"Exit: fake spike chop bar={m.group(1)}" if m else "Exit: fake spike chop"
+    return text
 
 def sep(w=130): print(dim("-" * w))
 def header(title, w=130):
@@ -877,6 +1008,7 @@ def find_exit_after_entry(
                     return r["timestamp"], price, pnl_now, (
                         f"Exit: opposite {opp.upper()} confirm {opp_reason} "
                         f"STRIKE={opp_strike} CNT={len(opp_confirm_history)} "
+                        f"FIRST_SCORE={first_opp['score']} LAST_SCORE={last_opp['score']} "
                         f"FIRST_UNITS={first_opp['units']} LAST_UNITS={last_opp['units']}"
                     )
 
@@ -888,6 +1020,7 @@ def find_exit_after_entry(
                     return r["timestamp"], price, pnl_now, (
                         f"Exit: strong opposite surge {opp.upper()} "
                         f"STRIKE={opp_strike} CNT={len(opp_confirm_history)} "
+                        f"FIRST_SCORE={first_opp['score']} LAST_SCORE={last_opp['score']} "
                         f"SCORE_RATIO={last_opp['score']}/{first_opp['score']}"
                     )
         else:
@@ -1046,17 +1179,21 @@ def strict_cross_snapshot(full, ts, strike, side):
     )
     opp_count = int(np.count_nonzero(opp_confirm))
 
-    # COMPOSITE SCORE: delta 40%, price 40%, volume 20%
-    volume_score  = (v80 * 2) + (v100 * 1) + (v150 * 2) + (v200 * 3)
-    delta_score   = (d2 * 3)  + (d3 * 2)   + (d4 * 2)   + (d5 * 3)
-    price_score   = (p3 * 3)  + (p4 * 2)   + (p5 * 2)   + (p6 * 2)   + (p7 * 3)
-    opp_score_pts = (opp_d2 * 2) + (opp_d4 * 2) + (opp_d6 * 2) + (opp_p3 * 2) + (opp_p5 * 2)
+    # COMPOSITE SCORE: same side and opposite side both use equal pillar weights.
+    volume_score = (v80 * 2) + (v100 * 3) + (v150 * 4) + (v200 * 5)
+    delta_score = (d2 * 2) + (d3 * 3) + (d4 * 4) + (d5 * 5)
+    price_score = (p3 * 2) + (p4 * 3) + (p5 * 4) + (p6 * 5) + (p7 * 6)
+    opp_volume_score = (opp_v80 * 2) + (opp_v100 * 3) + (opp_v150 * 4) + (opp_v200 * 5)
+    opp_delta_score = (opp_d2 * 2) + (opp_d4 * 4) + (opp_d6 * 6)
+    opp_price_score = (opp_p3 * 3) + (opp_p5 * 5)
 
     score = int(
-        delta_score * 0.40 +
-        price_score * 0.40 +
-        volume_score * 0.20 +
-        opp_score_pts
+        (delta_score * 0.33) +
+        (price_score * 0.33) +
+        (volume_score * 0.33) +
+        (opp_delta_score * 0.33) +
+        (opp_price_score * 0.33) +
+        (opp_volume_score * 0.33)
     )
 
     ok = own_count >= STRICT_MIN_SAME_STRIKES and opp_count >= STRICT_MIN_OPP_STRIKES
@@ -1065,7 +1202,8 @@ def strict_cross_snapshot(full, ts, strike, side):
         f"V80={v80} V100={v100} V150={v150} V200={v200} "
         f"D2={d2} D3={d3} D4={d4} D5={d5} "
         f"P3={p3} P4={p4} P5={p5} P6={p6} P7={p7} "
-        f"OppD2={opp_d2} OppD4={opp_d4} OppP3={opp_p3} OppP5={opp_p5}"
+        f"OppV80={opp_v80} OppV100={opp_v100} OppV150={opp_v150} OppV200={opp_v200} "
+        f"OppD2={opp_d2} OppD4={opp_d4} OppD6={opp_d6} OppP3={opp_p3} OppP5={opp_p5}"
     )
     # Extra quality metrics returned for spike-override quality checks
     extras = {"v80": v80, "v150": v150, "p5": p5, "opp_p3": opp_p3, "opp_p5": opp_p5, "d4": d4, "p6": p6}
@@ -3026,6 +3164,7 @@ def run_single_analysis(csv_path=None, analysis_date=None, preloaded_df=None):
             f"{rjust(color_pct(pp), 9)}  "
             f"{exit_reason:<28}  {reason}"
         )
+        print(scorecard_line(reason, side, exit_reason))
     pe_rows = [x for x in unique_rows if x[3] == "pe"]
 
     if pe_rows:
@@ -3054,6 +3193,7 @@ def run_single_analysis(csv_path=None, analysis_date=None, preloaded_df=None):
                 f"{rjust(color_pct(pp), 9)}  "
                 f"{exit_reason:<28}  {reason}"
             )
+            print(scorecard_line(reason, side, exit_reason))
 
         sep(W)
     if not unique_rows:
@@ -3133,6 +3273,7 @@ def run_single_analysis(csv_path=None, analysis_date=None, preloaded_df=None):
             "v_pct": float(vp),
             "p_pct": float(pp),
             "exit_reason": str(exit_reason),
+            "entry_reason": str(reason),
         })
 
     return {
@@ -3353,7 +3494,10 @@ def print_compact_monthly_summary(results, month, year, start_date, end_date):
                       f"{t['strike']:>8.1f} {t['entry']:>8.2f} {t['exit']:>8.2f} "
                       f"{trade_pnl} {trade_best} {trade_bad} {t['best_time']:<19} "
                       f"{t['d_pct']:>7.2f}% {t['g_pct']:>7.2f}% {t['v_pct']:>7.2f}% "
-                      f"{t['p_pct']:>7.2f}%  {t['exit_reason']}")
+                      f"{t['p_pct']:>7.2f}%  {short_exit_reason(t['exit_reason'])}")
+                print(compact_score_log(bright_green("ENTRY SCORE"), t.get("entry_reason", ""), t.get("side", "")))
+                print(compact_exit_log(t["exit_reason"]))
+                print()
             print()
 
         total_trades += r["trades"]
